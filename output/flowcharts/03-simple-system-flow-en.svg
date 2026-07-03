@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+  <defs>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B3B78"/>
+      <stop offset="1" stop-color="#1683D1"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#143A5E" flood-opacity=".15"/>
+    </filter>
+    <marker id="blueArrow" markerWidth="13" markerHeight="13" refX="10" refY="6.5" orient="auto">
+      <path d="M0,0 L13,6.5 L0,13 Z" fill="#2877B5"/>
+    </marker>
+    <marker id="orangeArrow" markerWidth="13" markerHeight="13" refX="10" refY="6.5" orient="auto">
+      <path d="M0,0 L13,6.5 L0,13 Z" fill="#DE8424"/>
+    </marker>
+    <style>
+      .title{font:700 49px Arial,sans-serif;fill:#fff}
+      .subtitle{font:400 25px Arial,sans-serif;fill:#D9EEFF}
+      .step-title{font:700 30px Arial,sans-serif;fill:#103A5D}
+      .step-copy{font:400 22px Arial,sans-serif;fill:#4A687F}
+      .num{font:700 25px Arial,sans-serif;fill:#fff;text-anchor:middle;dominant-baseline:middle}
+      .decision{font:700 27px Arial,sans-serif;fill:#103A5D;text-anchor:middle;dominant-baseline:middle}
+      .label{font:700 22px Arial,sans-serif}
+      .footer{font:400 20px Arial,sans-serif;fill:#71889A}
+      .blue-line{stroke:#2877B5;stroke-width:5;fill:none;marker-end:url(#blueArrow)}
+      .orange-line{stroke:#DE8424;stroke-width:5;fill:none;marker-end:url(#orangeArrow)}
+    </style>
+  </defs>
+
+  <rect width="1080" height="1920" fill="#F3F8FC"/>
+  <rect width="1080" height="155" fill="url(#header)"/>
+  <circle cx="78" cy="76" r="40" fill="#fff" opacity=".16"/>
+  <path d="M55 76h46M78 53v46" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+  <text x="140" y="67" class="title">MRP TRACEABILITY FLOW</text>
+  <text x="140" y="111" class="subtitle">From customer order to product delivery</text>
+
+  <path class="blue-line" d="M540 292V330"/>
+  <path class="blue-line" d="M540 452V490"/>
+  <path class="blue-line" d="M540 612V650"/>
+  <path class="blue-line" d="M540 772V815"/>
+
+  <g filter="url(#shadow)">
+    <rect x="145" y="180" width="790" height="112" rx="25" fill="#fff"/>
+    <circle cx="215" cy="236" r="34" fill="#1676BC"/><text x="215" y="238" class="num">1</text>
+    <text x="275" y="226" class="step-title">Sales Order</text>
+    <text x="275" y="263" class="step-copy">Receive and record the customer order</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="145" y="340" width="790" height="112" rx="25" fill="#fff"/>
+    <circle cx="215" cy="396" r="34" fill="#1676BC"/><text x="215" y="398" class="num">2</text>
+    <text x="275" y="386" class="step-title">Production Order</text>
+    <text x="275" y="423" class="step-copy">Create production based on the ordered quantity</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="145" y="500" width="790" height="112" rx="25" fill="#fff"/>
+    <circle cx="215" cy="556" r="34" fill="#1676BC"/><text x="215" y="558" class="num">3</text>
+    <text x="275" y="546" class="step-title">Production Tray</text>
+    <text x="275" y="583" class="step-copy">Assign finished goods to an identified tray</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="145" y="660" width="790" height="112" rx="25" fill="#fff"/>
+    <circle cx="215" cy="716" r="34" fill="#1676BC"/><text x="215" y="718" class="num">4</text>
+    <text x="275" y="706" class="step-title">Serial Number &amp; Laser Marking</text>
+    <text x="275" y="743" class="step-copy">Generate and mark a unique product serial number</text>
+  </g>
+
+  <polygon points="540,815 705,910 540,1005 375,910" fill="#DDEEFF" stroke="#1676BC" stroke-width="4"/>
+  <text x="540" y="895" class="decision">QC</text>
+  <text x="540" y="929" class="decision">INSPECTION</text>
+
+  <path class="blue-line" d="M375 910H235V1175H330"/>
+  <text x="255" y="878" class="label" fill="#147346">PASS</text>
+
+  <path class="orange-line" d="M705 910H795V992"/>
+  <text x="750" y="878" class="label" fill="#B35A15">REJECT</text>
+
+  <g filter="url(#shadow)">
+    <rect x="600" y="1002" width="390" height="128" rx="25" fill="#FFF0DF" stroke="#E5A45E" stroke-width="3"/>
+    <text x="650" y="1052" style="font:700 28px Arial;fill:#B35A15">Rework</text>
+    <text x="650" y="1090" class="step-copy">Repair and reinspect</text>
+  </g>
+  <path class="orange-line" d="M795 1130V1175H750"/>
+  <text x="795" y="1165" class="label" fill="#B35A15" text-anchor="middle">FINAL PASS</text>
+
+  <g filter="url(#shadow)">
+    <rect x="195" y="1185" width="690" height="120" rx="26" fill="#fff"/>
+    <circle cx="265" cy="1245" r="34" fill="#1676BC"/><text x="265" y="1247" class="num">5</text>
+    <text x="325" y="1235" class="step-title">Packing</text>
+    <text x="325" y="1272" class="step-copy">Pack approved products into boxes</text>
+  </g>
+
+  <path class="blue-line" d="M540 1305V1360"/>
+  <g filter="url(#shadow)">
+    <rect x="195" y="1370" width="690" height="120" rx="26" fill="#fff"/>
+    <circle cx="265" cy="1430" r="34" fill="#1676BC"/><text x="265" y="1432" class="num">6</text>
+    <text x="325" y="1420" class="step-title">Delivery Order</text>
+    <text x="325" y="1457" class="step-copy">Assign packed goods for customer delivery</text>
+  </g>
+
+  <path class="blue-line" d="M540 1490V1545"/>
+  <g filter="url(#shadow)">
+    <rect x="195" y="1555" width="690" height="120" rx="26" fill="#fff"/>
+    <circle cx="265" cy="1615" r="34" fill="#1676BC"/><text x="265" y="1617" class="num">7</text>
+    <text x="325" y="1605" class="step-title">Customer Delivery</text>
+    <text x="325" y="1642" class="step-copy">Ship the completed customer order</text>
+  </g>
+
+  <path class="blue-line" d="M540 1675V1730"/>
+  <g filter="url(#shadow)">
+    <rect x="145" y="1740" width="790" height="112" rx="27" fill="#0E5D9B"/>
+    <circle cx="215" cy="1796" r="34" fill="#fff"/>
+    <path d="M200 1796l10 10 21-24" fill="none" stroke="#0E5D9B" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="275" y="1786" style="font:700 30px Arial;fill:#fff">Traceability</text>
+    <text x="275" y="1823" style="font:400 22px Arial;fill:#DCEFFF">Track every serial from order to delivery</text>
+  </g>
+
+  <text x="540" y="1896" class="footer" text-anchor="middle">MRP Traceability System — Simplified Business Flow</text>
+</svg>

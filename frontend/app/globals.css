@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+body { @apply m-0 bg-slate-50 text-slate-900 antialiased; }
+button, a, input, select { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2; }
+button { @apply disabled:cursor-not-allowed disabled:opacity-50; }
+.card { @apply rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,.04),0_8px_24px_rgba(15,23,42,.04)]; }
+.field { @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-lg outline-none focus:border-blue-600; }
+.primary { @apply rounded-xl bg-blue-700 px-5 py-3 font-bold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md; }
+.danger { @apply rounded-xl bg-red-600 px-5 py-3 font-bold text-white hover:bg-red-700; }
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(147, 197, 253, .55) transparent;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+}
+.sidebar-scroll::-webkit-scrollbar { width: 7px; }
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin-block: 10px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(147, 197, 253, .72), rgba(59, 130, 246, .55)) padding-box;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(191, 219, 254, .9), rgba(96, 165, 250, .8)) padding-box;
+}
+.sidebar-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+@media print {
+  .print-hidden { display: none !important; }
+  body:has(.label-print-root) * { visibility: hidden !important; }
+  body:has(.label-print-root) .label-print-root,
+  body:has(.label-print-root) .label-print-root * { visibility: visible !important; }
+  body:has(.label-print-root) .label-print-root {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100mm !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+}

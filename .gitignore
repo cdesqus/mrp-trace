@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+!**/.env.example
+.next/
+node_modules/
+bin/
+coverage/
+.gocache/
+.cache/
+*.tsbuildinfo
+*.log

@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mrp
+      POSTGRES_USER: mrp
+      POSTGRES_PASSWORD: mrp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mrp -d mrp"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgres://mrp:mrp@postgres:5432/mrp?sslmode=disable
+      HTTP_ADDR: :8080
+      LASER_ADDR: host.docker.internal:9100
+      REWORK_PRINTER_ADDR: host.docker.internal:9101
+      SMALL_BOX_PRINTER_ADDR: host.docker.internal:9102
+      MASTER_BOX_PRINTER_ADDR: host.docker.internal:9103
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_DEMO_MODE: "false"
+    environment:
+      API_URL: http://backend:8080
+      NEXT_PUBLIC_OPERATOR_ID: POC-OPERATOR
+      NEXT_PUBLIC_STATION_ID: POC-STATION
+      NEXT_PUBLIC_MASTER_BOX_CAPACITY: 12
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
