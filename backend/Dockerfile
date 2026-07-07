@@ -9,5 +9,5 @@ FROM alpine:3.21
 RUN adduser -D -u 10001 app
 USER app
 COPY --from=build /out/api /api
-EXPOSE 8080
+EXPOSE 8090
 ENTRYPOINT ["/api"]

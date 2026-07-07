@@ -68,7 +68,8 @@ func (s *Server) listSmallBoxes(c *gin.Context) {
 	rows, err := s.db.Query(c, `
 		SELECT sb.id,sb.box_code,sb.status,sb.production_order_id,sb.packaging_config_id,
 		       sb.actual_qty,po.production_order_number,p.product_code,p.product_name,
-		       pc.small_boxes_per_master_box,MIN(u.serial_number),MAX(u.serial_number),sb.packed_by,sb.packed_at
+		       pc.parts_per_small_box,pc.small_boxes_per_master_box,
+		       MIN(u.serial_number),MAX(u.serial_number),sb.packed_by,sb.packed_at
 		FROM t_small_boxes sb
 		JOIN t_production_orders po ON po.id=sb.production_order_id
 		JOIN t_sales_order_lines sol ON sol.id=po.sales_order_line_id
@@ -77,7 +78,7 @@ func (s *Server) listSmallBoxes(c *gin.Context) {
 		JOIN t_small_box_units sbu ON sbu.small_box_id=sb.id
 		JOIN t_units_tracking u ON u.id=sbu.unit_id
 		WHERE sb.status=$1
-		GROUP BY sb.id,po.production_order_number,p.product_code,p.product_name,pc.small_boxes_per_master_box
+		GROUP BY sb.id,po.production_order_number,p.product_code,p.product_name,pc.parts_per_small_box,pc.small_boxes_per_master_box
 		ORDER BY sb.packed_at,sb.id
 		LIMIT 500
 	`, status)
@@ -90,11 +91,11 @@ func (s *Server) listSmallBoxes(c *gin.Context) {
 	for rows.Next() {
 		var id, productionID, configID int64
 		var code, boxStatus, productionNumber, productCode, productName, firstSerial, lastSerial, packedBy string
-		var actualQty, masterCapacity int
+		var actualQty, smallCapacity, masterCapacity int
 		var packedAt time.Time
 		if err = rows.Scan(
 			&id, &code, &boxStatus, &productionID, &configID, &actualQty, &productionNumber,
-			&productCode, &productName, &masterCapacity, &firstSerial, &lastSerial, &packedBy, &packedAt,
+			&productCode, &productName, &smallCapacity, &masterCapacity, &firstSerial, &lastSerial, &packedBy, &packedAt,
 		); err != nil {
 			fail(c, 500, err)
 			return
@@ -104,7 +105,7 @@ func (s *Server) listSmallBoxes(c *gin.Context) {
 			"production_order_id": productionID, "production_order_number": productionNumber,
 			"packaging_config_id": configID, "actual_qty": actualQty,
 			"product_code": productCode, "product_name": productName,
-			"master_box_capacity": masterCapacity, "serial_from": firstSerial,
+			"small_box_capacity": smallCapacity, "master_box_capacity": masterCapacity, "serial_from": firstSerial,
 			"serial_to": lastSerial, "packed_by": packedBy, "packed_at": packedAt,
 		})
 	}
@@ -114,12 +115,13 @@ func (s *Server) listSmallBoxes(c *gin.Context) {
 func (s *Server) getSmallBox(c *gin.Context) {
 	var id, productionID, configID int64
 	var code, status, productionNumber, productCode, productName, firstSerial, lastSerial, packedBy string
-	var actualQty, masterCapacity int
+	var actualQty, smallCapacity, masterCapacity int
 	var packedAt time.Time
 	err := s.db.QueryRow(c, `
 		SELECT sb.id,sb.box_code,sb.status,sb.production_order_id,sb.packaging_config_id,
 		       sb.actual_qty,po.production_order_number,p.product_code,p.product_name,
-		       pc.small_boxes_per_master_box,MIN(u.serial_number),MAX(u.serial_number),sb.packed_by,sb.packed_at
+		       pc.parts_per_small_box,pc.small_boxes_per_master_box,
+		       MIN(u.serial_number),MAX(u.serial_number),sb.packed_by,sb.packed_at
 		FROM t_small_boxes sb
 		JOIN t_production_orders po ON po.id=sb.production_order_id
 		JOIN t_sales_order_lines sol ON sol.id=po.sales_order_line_id
@@ -128,10 +130,10 @@ func (s *Server) getSmallBox(c *gin.Context) {
 		JOIN t_small_box_units sbu ON sbu.small_box_id=sb.id
 		JOIN t_units_tracking u ON u.id=sbu.unit_id
 		WHERE sb.box_code=$1
-		GROUP BY sb.id,po.production_order_number,p.product_code,p.product_name,pc.small_boxes_per_master_box
+		GROUP BY sb.id,po.production_order_number,p.product_code,p.product_name,pc.parts_per_small_box,pc.small_boxes_per_master_box
 	`, c.Param("code")).Scan(
 		&id, &code, &status, &productionID, &configID, &actualQty, &productionNumber,
-		&productCode, &productName, &masterCapacity, &firstSerial, &lastSerial, &packedBy, &packedAt,
+		&productCode, &productName, &smallCapacity, &masterCapacity, &firstSerial, &lastSerial, &packedBy, &packedAt,
 	)
 	if err != nil {
 		fail(c, http.StatusNotFound, fmt.Errorf("small box not found"))
@@ -142,7 +144,8 @@ func (s *Server) getSmallBox(c *gin.Context) {
 		"production_order_id": productionID, "production_order_number": productionNumber,
 		"packaging_config_id": configID, "actual_qty": actualQty,
 		"product_code": productCode, "product_name": productName,
-		"master_box_capacity": masterCapacity, "serial_from": firstSerial, "serial_to": lastSerial,
+		"small_box_capacity": smallCapacity, "master_box_capacity": masterCapacity,
+		"serial_from": firstSerial, "serial_to": lastSerial,
 		"packed_by": packedBy, "packed_at": packedAt,
 	})
 }
@@ -339,8 +342,8 @@ func (s *Server) lockMasterBox(c *gin.Context) {
 		}
 		total += item.qty
 	}
-	if len(boxes) != first.capacity {
-		fail(c, 400, fmt.Errorf("master box requires exactly %d small boxes", first.capacity))
+	if len(boxes) > first.capacity {
+		fail(c, 400, fmt.Errorf("master box accepts maximum %d small boxes", first.capacity))
 		return
 	}
 	var productionNumber, productCode, productName, serialFrom, serialTo string
@@ -386,6 +389,10 @@ func (s *Server) lockMasterBox(c *gin.Context) {
 				return ids
 			}())
 	}
+	boxStatus := "PARTIAL"
+	if len(boxes) == first.capacity {
+		boxStatus = "FULL"
+	}
 	if err == nil {
 		payload := fmt.Sprintf(`^XA
 ^PW800^LL620
@@ -396,16 +403,18 @@ func (s *Server) lockMasterBox(c *gin.Context) {
 ^FO30,145^A0N,22,22^FDPRODUCT^FS
 ^FO30,175^A0N,36,36^FD%s^FS
 ^FO30,215^A0N,24,24^FD%s^FS
-^FO30,260^A0N,22,22^FDSMALL BOXES: %d^FS
+^FO30,260^A0N,22,22^FDSMALL BOXES: %d / %d^FS
 ^FO30,295^A0N,22,22^FDTOTAL QTY: %d PCS^FS
-^FO30,335^A0N,22,22^FDSERIAL FROM: %s^FS
-^FO30,370^A0N,22,22^FDSERIAL TO:   %s^FS
-^FO30,410^A0N,22,22^FDPO: %s^FS
+^FO30,330^A0N,22,22^FDSTATUS: %s MASTER BOX^FS
+^FO30,365^A0N,22,22^FDSERIAL FROM: %s^FS
+^FO30,400^A0N,22,22^FDSERIAL TO:   %s^FS
+^FO30,440^A0N,22,22^FDPO: %s^FS
 ^FO30,455^GB740,2,2^FS
 ^FO30,480^A0N,30,30^FDMASTER ID: %s^FS
 ^FO30,530^A0N,20,20^FDPACKED: %s UTC | QC PASSED^FS
 ^XZ`,
-			zplField(code), zplField(productCode), zplField(productName), len(boxes), total,
+			zplField(code), zplField(productCode), zplField(productName), len(boxes), first.capacity, total,
+			zplField(boxStatus),
 			zplField(serialFrom), zplField(serialTo), zplField(productionNumber),
 			zplField(code), packedAt.Format("2006-01-02 15:04"))
 		_, err = tx.Exec(c, `
@@ -425,6 +434,7 @@ func (s *Server) lockMasterBox(c *gin.Context) {
 	c.JSON(201, gin.H{
 		"master_box_id": masterID, "master_box_code": code,
 		"small_box_count": len(boxes), "small_box_codes": req.SmallBoxCodes,
+		"master_box_capacity": first.capacity, "box_status": boxStatus,
 		"unit_quantity": total, "production_order_number": productionNumber,
 		"product_code": productCode, "product_name": productName,
 		"serial_from": serialFrom, "serial_to": serialTo,

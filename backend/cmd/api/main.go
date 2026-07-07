@@ -20,7 +20,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	databaseURL := env("DATABASE_URL", "postgres://mrp:mrp@localhost:5432/mrp?sslmode=disable")
+	databaseURL := env("DATABASE_URL", "postgres://mrp:mrp@localhost:5444/mrp?sslmode=disable")
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		log.Fatal(err)
@@ -40,7 +40,7 @@ func main() {
 	go worker.Run(ctx)
 
 	server := &http.Server{
-		Addr:              env("HTTP_ADDR", ":8080"),
+		Addr:              env("HTTP_ADDR", ":8090"),
 		Handler:           api.New(pool),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

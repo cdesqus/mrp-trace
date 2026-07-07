@@ -804,8 +804,8 @@ func (s *Server) createPreQCFlowLaserBatch(c *gin.Context) {
 	defer tx.Rollback(c)
 	_, _ = tx.Exec(c, `SELECT pg_advisory_xact_lock(26062901)`)
 	var productionID, trayCycleID, configID, carrierTrayID int64
-	var capacity int
-	err = tx.QueryRow(c, `SELECT qs.production_order_id,qs.tray_cycle_id,sol.packaging_config_id,pc.parts_per_small_box FROM t_qc_sessions qs JOIN t_production_orders po ON po.id=qs.production_order_id JOIN t_sales_order_lines sol ON sol.id=po.sales_order_line_id JOIN m_packaging_configs pc ON pc.id=sol.packaging_config_id WHERE qs.id=$1`, req.QCSessionID).Scan(&productionID, &trayCycleID, &configID, &capacity)
+	var capacity, plannedQty int
+	err = tx.QueryRow(c, `SELECT qs.production_order_id,qs.tray_cycle_id,sol.packaging_config_id,pc.parts_per_small_box,po.planned_qty FROM t_qc_sessions qs JOIN t_production_orders po ON po.id=qs.production_order_id JOIN t_sales_order_lines sol ON sol.id=po.sales_order_line_id JOIN m_packaging_configs pc ON pc.id=sol.packaging_config_id WHERE qs.id=$1`, req.QCSessionID).Scan(&productionID, &trayCycleID, &configID, &capacity, &plannedQty)
 	if err != nil {
 		fail(c, 409, fmt.Errorf("QC session is unavailable"))
 		return
@@ -839,18 +839,29 @@ func (s *Server) createPreQCFlowLaserBatch(c *gin.Context) {
 		fail(c, 409, fmt.Errorf("no QC-passed items are ready for this batch"))
 		return
 	}
+	var existingUnits int
+	if err = tx.QueryRow(c, `SELECT COUNT(*) FROM t_units_tracking u JOIN t_serial_groups sg ON sg.id=u.serial_group_id WHERE sg.production_order_id=$1`, productionID).Scan(&existingUnits); err != nil {
+		fail(c, 500, err)
+		return
+	}
 	unitIDs := make([]int64, 0, len(preIDs))
 	serials := make([]string, 0, len(preIDs))
 	for _, preID := range preIDs {
 		var groupID int64
 		err = tx.QueryRow(c, `SELECT sg.id FROM t_serial_groups sg WHERE sg.production_order_id=$1 AND sg.status='QC_PROCESS' AND (SELECT COUNT(*) FROM t_units_tracking u WHERE u.serial_group_id=sg.id)<sg.group_size ORDER BY sg.id LIMIT 1`, productionID).Scan(&groupID)
 		if err != nil {
+			remainingQty := plannedQty - existingUnits
+			if remainingQty <= 0 {
+				fail(c, 409, fmt.Errorf("production order quantity is already fully serialized"))
+				return
+			}
+			groupSize := min(capacity, remainingQty)
 			var groupNumber int
 			if err = tx.QueryRow(c, `SELECT COALESCE(MAX(group_number),0)+1 FROM t_serial_groups WHERE production_order_id=$1`, productionID).Scan(&groupNumber); err != nil {
 				fail(c, 500, err)
 				return
 			}
-			if err = tx.QueryRow(c, `INSERT INTO t_serial_groups(production_order_id,packaging_config_id,group_number,group_size,production_date,status) VALUES($1,$2,$3,$4,CURRENT_DATE,'QC_PROCESS') RETURNING id`, productionID, configID, groupNumber, capacity).Scan(&groupID); err != nil {
+			if err = tx.QueryRow(c, `INSERT INTO t_serial_groups(production_order_id,packaging_config_id,group_number,group_size,production_date,status) VALUES($1,$2,$3,$4,CURRENT_DATE,'QC_PROCESS') RETURNING id`, productionID, configID, groupNumber, groupSize).Scan(&groupID); err != nil {
 				fail(c, 500, err)
 				return
 			}
@@ -875,6 +886,7 @@ func (s *Server) createPreQCFlowLaserBatch(c *gin.Context) {
 			fail(c, 500, err)
 			return
 		}
+		existingUnits++
 		unitIDs = append(unitIDs, unitID)
 		serials = append(serials, serial)
 	}

@@ -21,9 +21,9 @@ traceability.
 docker compose up --build
 ```
 
-- Web: http://localhost:3000
-- API health: http://localhost:8080/health
-- PostgreSQL: localhost:5432 (`mrp` / `mrp`)
+- Web: http://localhost:3018
+- API health: http://localhost:8090/health
+- PostgreSQL: localhost:5444 (`mrp` / `mrp`)
 
 Device addresses are configured through `LASER_ADDR`, `REWORK_PRINTER_ADDR`,
 `SMALL_BOX_PRINTER_ADDR`, and `MASTER_BOX_PRINTER_ADDR`.
