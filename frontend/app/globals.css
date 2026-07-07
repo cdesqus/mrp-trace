@@ -37,14 +37,21 @@ button { @apply disabled:cursor-not-allowed disabled:opacity-50; }
   height: 0;
 }
 @media print {
+  @page { margin: 6mm; }
   .print-hidden { display: none !important; }
   body:has(.label-print-root) * { visibility: hidden !important; }
   body:has(.label-print-root) .label-print-root,
   body:has(.label-print-root) .label-print-root * { visibility: visible !important; }
+  body:has(.label-print-root) {
+    margin: 0 !important;
+    background: white !important;
+  }
   body:has(.label-print-root) .label-print-root {
-    position: absolute !important;
-    inset: 0 auto auto 0 !important;
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
     width: 100mm !important;
+    max-width: 100mm !important;
     border-radius: 0 !important;
     box-shadow: none !important;
   }

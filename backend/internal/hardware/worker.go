@@ -156,6 +156,12 @@ func Send(ctx context.Context, address string, payload []byte) error {
 	if address == "" {
 		return fmt.Errorf("device address is not configured")
 	}
+	if address == "SIMULATE_SUCCESS" {
+		return nil
+	}
+	if address == "SIMULATE_FAIL" {
+		return fmt.Errorf("simulated device failure")
+	}
 	dialer := net.Dialer{Timeout: 3 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {

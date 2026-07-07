@@ -20,7 +20,7 @@ const copy = {
   products: { title: "Products", description: "Maintain finished-good products, QC references, and ownership history.", button: "New Product" },
   packaging: { title: "Packaging Configurations", description: "Version box capacities without changing historical orders.", button: "New Configuration" },
 };
-const emptyForm = { code: "", name: "", product_id: "", parts_per_small_box: "", small_boxes_per_master_box: "" };
+const emptyForm = { code: "", name: "", product_id: "", parts_per_small_box: "", small_boxes_per_master_box: "", qc_image_data_url: "" };
 
 export function MasterDataWorkspace({ mode }: { mode: Mode }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -36,7 +36,6 @@ export function MasterDataWorkspace({ mode }: { mode: Mode }) {
   const [formError, setFormError] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [imageProduct, setImageProduct] = useState<Product | null>(null);
-  const [imageSaving, setImageSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,6 +79,7 @@ export function MasterDataWorkspace({ mode }: { mode: Mode }) {
       product_id: "product_id" in item ? String(item.product_id) : "",
       parts_per_small_box: "parts_per_small_box" in item ? String(item.parts_per_small_box) : "",
       small_boxes_per_master_box: "small_boxes_per_master_box" in item ? String(item.small_boxes_per_master_box) : "",
+      qc_image_data_url: "qc_image_data_url" in item ? item.qc_image_data_url ?? "" : "",
     });
     setFormError("");
     setEditorOpen(true);
@@ -102,7 +102,7 @@ export function MasterDataWorkspace({ mode }: { mode: Mode }) {
       });
       if (mode === "products") await api(editing ? `/api/master/products/${editing.id}` : "/api/master/products", {
         method: editing ? "PATCH" : "POST",
-        body: JSON.stringify({ code: form.code, name: form.name, is_active: editing?.is_active ?? true }),
+        body: JSON.stringify({ code: form.code, name: form.name, is_active: editing?.is_active ?? true, qc_image_data_url: form.qc_image_data_url }),
       });
       if (mode === "packaging") await api(editing ? `/api/master/packaging-configs/${editing.id}` : "/api/master/packaging-configs", {
         method: editing ? "PATCH" : "POST",
@@ -132,25 +132,12 @@ export function MasterDataWorkspace({ mode }: { mode: Mode }) {
     }
   }
 
-  async function saveQCImage(imageDataURL: string) {
-    if (!imageProduct) return;
-    setImageSaving(true);
-    try {
-      await api(`/api/master/products/${imageProduct.id}/qc-image`, { method: "PUT", body: JSON.stringify({ image_data_url: imageDataURL }) });
-      setImageProduct((current) => current ? { ...current, qc_image_data_url: imageDataURL || null } : null);
-      await load();
-    } catch (reason) {
-      setError((reason as Error).message);
-    } finally {
-      setImageSaving(false);
-    }
-  }
-  function selectQCImage(file?: File) {
+  function selectFormQCImage(file?: File) {
     if (!file) return;
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) return setError("QC image must be JPEG, PNG, or WebP.");
     if (file.size > 5 * 1024 * 1024) return setError("QC image must not exceed 5 MB.");
     const reader = new FileReader();
-    reader.onload = () => void saveQCImage(String(reader.result));
+    reader.onload = () => setForm((current) => ({ ...current, qc_image_data_url: String(reader.result) }));
     reader.onerror = () => setError("The selected QC image could not be read.");
     reader.readAsDataURL(file);
   }
@@ -181,7 +168,7 @@ export function MasterDataWorkspace({ mode }: { mode: Mode }) {
             <tbody className="divide-y divide-slate-100">
               {loading && Array.from({ length: 4 }).map((_, index) => <tr key={index}><td className="px-5 py-5" colSpan={8}><div className="h-4 animate-pulse rounded bg-slate-100" /></td></tr>)}
               {!loading && mode === "customers" && (rows as Customer[]).map((item) => <tr className="hover:bg-blue-50/40" key={item.id}><td className="px-5 py-4 font-mono font-bold text-blue-900">{item.code}</td><td className="px-5 py-4 font-semibold">{item.name}</td><AuditCell item={item}/><StatusCell active={item.is_active}/><ActionCell item={item} onEdit={() => openEdit(item)} onToggle={() => void toggle(item)} onView={() => setViewing(item)}/></tr>)}
-              {!loading && mode === "products" && (rows as Product[]).map((item) => <tr className="hover:bg-blue-50/40" key={item.id}><td className="px-5 py-4 font-mono font-bold text-blue-900">{item.code}</td><td className="px-5 py-4 font-semibold">{item.name}</td><td className="px-5 py-4">{item.qc_image_data_url ? <button className="flex items-center gap-2 rounded-xl border bg-blue-50 p-2 text-xs font-black text-blue-700" onClick={() => setImageProduct(item)}><img alt="" className="h-10 w-14 rounded object-cover" src={item.qc_image_data_url}/>View / Replace</button> : <button className="rounded-xl border border-dashed px-3 py-2 text-xs font-bold text-slate-500" onClick={() => setImageProduct(item)}>+ Upload Image</button>}</td><AuditCell item={item}/><StatusCell active={item.is_active}/><ActionCell item={item} onEdit={() => openEdit(item)} onToggle={() => void toggle(item)} onView={() => setViewing(item)}/></tr>)}
+              {!loading && mode === "products" && (rows as Product[]).map((item) => <tr className="hover:bg-blue-50/40" key={item.id}><td className="px-5 py-4 font-mono font-bold text-blue-900">{item.code}</td><td className="px-5 py-4 font-semibold">{item.name}</td><td className="px-5 py-4">{item.qc_image_data_url ? <button className="flex items-center gap-2 rounded-xl border bg-blue-50 p-2 text-xs font-black text-blue-700" onClick={() => setImageProduct(item)}><img alt="" className="h-10 w-14 rounded object-cover" src={item.qc_image_data_url}/>View Image</button> : <span className="rounded-xl border border-dashed px-3 py-2 text-xs font-bold text-slate-400">No image</span>}</td><AuditCell item={item}/><StatusCell active={item.is_active}/><ActionCell item={item} onEdit={() => openEdit(item)} onToggle={() => void toggle(item)} onView={() => setViewing(item)}/></tr>)}
               {!loading && mode === "packaging" && (rows as Packaging[]).map((item) => <tr className="hover:bg-blue-50/40" key={item.id}><td className="px-5 py-4"><p className="font-semibold">{item.product_name}</p><p className="text-xs text-slate-400">{item.product_code}</p></td><td className="px-5 py-4 font-bold">{item.name}</td><td className="px-5 py-4">v{item.version}</td><td className="px-5 py-4">{item.parts_per_small_box} FG</td><td className="px-5 py-4">{item.small_boxes_per_master_box} boxes · {item.parts_per_master_box} FG</td><AuditCell item={item}/><StatusCell active={item.is_active}/><ActionCell item={item} onEdit={() => openEdit(item)} onToggle={() => void toggle(item)} onView={() => setViewing(item)}/></tr>)}
             </tbody>
           </table>
@@ -189,26 +176,26 @@ export function MasterDataWorkspace({ mode }: { mode: Mode }) {
         {!loading && !rows.length && <div className="py-16 text-center"><h3 className="font-black">No master data found</h3><p className="mt-1 text-sm text-slate-500">Create the first record to use it in operational modules.</p></div>}
       </section>
 
-      {editorOpen && <EditorModal mode={mode} editing={editing} form={form} setForm={setForm} products={products} configTotal={configTotal} error={formError} saving={saving} onClose={closeEditor} onSubmit={save}/>}
+      {editorOpen && <EditorModal mode={mode} editing={editing} form={form} setForm={setForm} products={products} configTotal={configTotal} error={formError} saving={saving} onClose={closeEditor} onSubmit={save} onImageFile={selectFormQCImage}/>}
       {viewing && <ViewModal item={viewing} onClose={() => setViewing(null)} onEdit={() => { const item = viewing; setViewing(null); openEdit(item); }}/>}
-      {imageProduct && <ImageModal product={imageProduct} saving={imageSaving} onClose={() => setImageProduct(null)} onFile={selectQCImage} onRemove={() => void saveQCImage("")}/>}
+      {imageProduct && <ImageModal product={imageProduct} onClose={() => setImageProduct(null)}/>}
     </ModulePage>
   );
 }
 
-function EditorModal({ mode, editing, form, setForm, products, configTotal, error, saving, onClose, onSubmit }: {
+function EditorModal({ mode, editing, form, setForm, products, configTotal, error, saving, onClose, onSubmit, onImageFile }: {
   mode: Mode; editing: MasterItem | null; form: typeof emptyForm; setForm: (value: typeof emptyForm) => void;
-  products: Product[]; configTotal: number; error: string; saving: boolean; onClose: () => void; onSubmit: (event: FormEvent) => void;
+  products: Product[]; configTotal: number; error: string; saving: boolean; onClose: () => void; onSubmit: (event: FormEvent) => void; onImageFile: (file?: File) => void;
 }) {
-  return <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><form className="w-full max-w-xl rounded-3xl bg-white shadow-2xl" onSubmit={onSubmit}><header className="border-b px-6 py-5"><p className="text-xs font-black uppercase tracking-wider text-blue-700">Master Data</p><h2 className="mt-1 text-2xl font-black">{editing ? "Edit Record" : "Create Record"}</h2>{editing && mode === "packaging" && <p className="mt-1 text-sm text-slate-500">Saving creates a new version to protect historical orders.</p>}</header><div className="space-y-4 p-6">{error && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}{mode !== "packaging" ? <><Field label={mode === "customers" ? "Customer Code" : "Product Code"}><input autoFocus className="field mt-2 uppercase" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })}/></Field><Field label={mode === "customers" ? "Customer Name" : "Product Name"}><input className="field mt-2" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></Field></> : <><Field label="Product"><select autoFocus className="field mt-2" value={form.product_id} onChange={(event) => setForm({ ...form, product_id: event.target.value })}><option value="">Select product</option>{products.filter((item) => item.is_active || String(item.id) === form.product_id).map((item) => <option key={item.id} value={item.id}>{item.code} — {item.name}</option>)}</select></Field><Field label="Configuration Name"><input className="field mt-2" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></Field><div className="grid grid-cols-2 gap-4"><Field label="FG per Small Box"><input className="field mt-2" min="1" type="number" value={form.parts_per_small_box} onChange={(event) => setForm({ ...form, parts_per_small_box: event.target.value })}/></Field><Field label="Small Boxes per Master"><input className="field mt-2" min="1" type="number" value={form.small_boxes_per_master_box} onChange={(event) => setForm({ ...form, small_boxes_per_master_box: event.target.value })}/></Field></div><div className="rounded-xl bg-blue-50 p-4"><p className="text-xs font-black uppercase text-blue-600">Master Capacity</p><p className="mt-1 text-2xl font-black text-blue-950">{configTotal} FG</p></div></>}</div><footer className="flex justify-end gap-3 border-t p-4"><button className="rounded-xl border px-5 py-3 font-bold" type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={saving || !form.name || (mode !== "packaging" ? !form.code : !form.product_id || configTotal <= 0)}>{saving ? "Saving…" : editing ? "Save Changes" : "Create Record"}</button></footer></form></div>;
+  return <div className="fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><form className="my-6 w-full max-w-xl rounded-3xl bg-white shadow-2xl" onSubmit={onSubmit}><header className="border-b px-6 py-5"><p className="text-xs font-black uppercase tracking-wider text-blue-700">Master Data</p><h2 className="mt-1 text-2xl font-black">{editing ? "Edit Record" : "Create Record"}</h2>{editing && mode === "packaging" && <p className="mt-1 text-sm text-slate-500">Saving creates a new version to protect historical orders.</p>}</header><div className="space-y-4 p-6">{error && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}{mode !== "packaging" ? <><Field label={mode === "customers" ? "Customer Code" : "Product Code"}><input autoFocus className="field mt-2 uppercase" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })}/></Field><Field label={mode === "customers" ? "Customer Name" : "Product Name"}><input className="field mt-2" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></Field>{mode==="products"&&<div className="rounded-2xl border border-dashed bg-slate-50 p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-black">QC Reference Image</p><p className="mt-1 text-xs text-slate-500">Shown to operators during QC inspection.</p></div>{form.qc_image_data_url&&<button className="rounded-lg px-3 py-2 text-xs font-black text-red-600 hover:bg-red-50" type="button" onClick={()=>setForm({...form,qc_image_data_url:""})}>Remove</button>}</div>{form.qc_image_data_url?<img alt="QC reference preview" className="mt-3 max-h-56 w-full rounded-xl bg-white object-contain" src={form.qc_image_data_url}/>:<div className="mt-3 flex min-h-32 items-center justify-center rounded-xl bg-white text-sm text-slate-400">No image selected</div>}<label className="mt-3 inline-flex cursor-pointer rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-800">{form.qc_image_data_url?"Replace Image":"Upload Image"}<input accept="image/jpeg,image/png,image/webp" className="hidden" type="file" onChange={(event)=>onImageFile(event.target.files?.[0])}/></label></div>}</> : <><Field label="Product"><select autoFocus className="field mt-2" value={form.product_id} onChange={(event) => setForm({ ...form, product_id: event.target.value })}><option value="">Select product</option>{products.filter((item) => item.is_active || String(item.id) === form.product_id).map((item) => <option key={item.id} value={item.id}>{item.code} — {item.name}</option>)}</select></Field><Field label="Configuration Name"><input className="field mt-2" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></Field><div className="grid grid-cols-2 gap-4"><Field label="FG per Small Box"><input className="field mt-2" min="1" type="number" value={form.parts_per_small_box} onChange={(event) => setForm({ ...form, parts_per_small_box: event.target.value })}/></Field><Field label="Small Boxes per Master"><input className="field mt-2" min="1" type="number" value={form.small_boxes_per_master_box} onChange={(event) => setForm({ ...form, small_boxes_per_master_box: event.target.value })}/></Field></div><div className="rounded-xl bg-blue-50 p-4"><p className="text-xs font-black uppercase text-blue-600">Master Capacity</p><p className="mt-1 text-2xl font-black text-blue-950">{configTotal} FG</p></div></>}</div><footer className="flex justify-end gap-3 border-t p-4"><button className="rounded-xl border px-5 py-3 font-bold" type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={saving || !form.name || (mode !== "packaging" ? !form.code : !form.product_id || configTotal <= 0)}>{saving ? "Saving…" : editing ? "Save Changes" : "Create Record"}</button></footer></form></div>;
 }
 
 function ViewModal({ item, onClose, onEdit }: { item: MasterItem; onClose: () => void; onEdit: () => void }) {
   return <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="w-full max-w-lg rounded-3xl bg-white shadow-2xl"><header className="border-b p-6"><p className="text-xs font-black uppercase tracking-wider text-blue-700">Record Details</p><h2 className="mt-1 text-2xl font-black">{"code" in item ? item.code : `${item.product_code} · ${item.name}`}</h2></header><dl className="grid grid-cols-2 gap-5 p-6 text-sm"><Detail label="Name" value={item.name}/><Detail label="Status" value={item.is_active ? "Active" : "Inactive"}/>{"parts_per_small_box" in item && <><Detail label="Version" value={`v${item.version}`}/><Detail label="Small Box" value={`${item.parts_per_small_box} FG`}/><Detail label="Master Box" value={`${item.small_boxes_per_master_box} boxes`}/></>}<Detail label="Created By" value={item.created_by ?? "System"}/><Detail label="Created At" value={formatDate(item.created_at)}/><Detail label="Last Updated By" value={item.updated_by ?? item.created_by ?? "System"}/><Detail label="Last Updated" value={formatDate(item.updated_at)}/></dl><footer className="flex justify-end gap-3 border-t p-4"><button className="rounded-xl border px-5 py-3 font-bold" onClick={onClose}>Close</button><button className="primary" onClick={onEdit}>Edit Record</button></footer></section></div>;
 }
 
-function ImageModal({ product, saving, onClose, onFile, onRemove }: { product: Product; saving: boolean; onClose: () => void; onFile: (file?: File) => void; onRemove: () => void }) {
-  return <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"><section className="w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl"><header className="flex justify-between border-b p-6"><div><p className="text-xs font-black uppercase tracking-wider text-blue-700">QC Reference Image</p><h2 className="mt-1 text-2xl font-black">{product.code} · {product.name}</h2></div><button className="rounded-xl p-2 text-xl" onClick={onClose}>×</button></header><div className="bg-slate-100 p-6">{product.qc_image_data_url ? <img alt={`QC guide for ${product.name}`} className="mx-auto max-h-[55vh] w-full rounded-2xl bg-white object-contain" src={product.qc_image_data_url}/> : <div className="flex min-h-64 items-center justify-center rounded-2xl border-2 border-dashed bg-white text-slate-500">No QC image uploaded</div>}</div><footer className="flex justify-end gap-3 border-t p-4">{product.qc_image_data_url && <button className="rounded-xl px-4 py-3 font-bold text-red-600" disabled={saving} onClick={onRemove}>Remove Image</button>}<label className="primary cursor-pointer">{saving ? "Saving…" : product.qc_image_data_url ? "Replace Image" : "Upload Image"}<input accept="image/jpeg,image/png,image/webp" className="hidden" type="file" onChange={(event) => onFile(event.target.files?.[0])}/></label></footer></section></div>;
+function ImageModal({ product, onClose }: { product: Product; onClose: () => void }) {
+  return <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"><section className="w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl"><header className="flex justify-between border-b p-6"><div><p className="text-xs font-black uppercase tracking-wider text-blue-700">QC Reference Image</p><h2 className="mt-1 text-2xl font-black">{product.code} · {product.name}</h2></div><button className="rounded-xl p-2 text-xl" onClick={onClose}>×</button></header><div className="bg-slate-100 p-6">{product.qc_image_data_url ? <img alt={`QC guide for ${product.name}`} className="mx-auto max-h-[55vh] w-full rounded-2xl bg-white object-contain" src={product.qc_image_data_url}/> : <div className="flex min-h-64 items-center justify-center rounded-2xl border-2 border-dashed bg-white text-slate-500">No QC image uploaded</div>}</div><footer className="flex justify-end border-t p-4"><button className="rounded-xl border px-5 py-3 font-bold" onClick={onClose}>Close</button></footer></section></div>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-sm font-bold">{label}{children}</label>; }

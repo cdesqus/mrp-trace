@@ -56,6 +56,7 @@ func New(db *pgxpool.Pool) http.Handler {
 	api.POST("/qc/v2/rework-trays/:code/lock", s.lockReworkTray)
 	api.DELETE("/qc/v2/rework-trays/:code/lock", s.unlockReworkTray)
 	api.POST("/qc/sessions", s.createQCSession)
+	api.GET("/qc/sessions/active", s.listActiveQCSessions)
 	api.GET("/qc/sessions/:id", s.getQCSession)
 	api.POST("/qc/sessions/:id/evaluate", s.evaluateQCSessionItem)
 	api.POST("/qc/sessions/:id/finish", s.finishQCSession)
@@ -109,7 +110,12 @@ func (s *Server) health(c *gin.Context) {
 }
 
 func stationContext(c *gin.Context) (operator, station string, ok bool) {
-	operator = c.GetHeader("X-Operator-ID")
+	if user, exists := c.Get("auth_user"); exists {
+		operator = user.(authUser).FullName
+	}
+	if operator == "" {
+		operator = c.GetHeader("X-Operator-ID")
+	}
 	station = c.GetHeader("X-Station-ID")
 	if operator == "" {
 		if username, exists := c.Get("auth_username"); exists {

@@ -168,8 +168,9 @@ func (s *Server) listProducts(c *gin.Context) {
 }
 
 type productRequest struct {
-	Code string `json:"code" binding:"required"`
-	Name string `json:"name" binding:"required"`
+	Code           string `json:"code" binding:"required"`
+	Name           string `json:"name" binding:"required"`
+	QCImageDataURL string `json:"qc_image_data_url"`
 }
 
 func (s *Server) createProduct(c *gin.Context) {
@@ -178,12 +179,17 @@ func (s *Server) createProduct(c *gin.Context) {
 		fail(c, 400, err)
 		return
 	}
+	image, imageErr := normalizeQCImage(req.QCImageDataURL)
+	if imageErr != nil {
+		fail(c, imageErr.status, imageErr.err)
+		return
+	}
 	var id int64
 	userID, _ := c.Get("auth_user_id")
 	err := s.db.QueryRow(c, `
-		INSERT INTO m_products (product_code,product_name,created_by_user_id,updated_by_user_id)
-		VALUES ($1,$2,$3,$3) RETURNING id
-	`, strings.ToUpper(strings.TrimSpace(req.Code)), strings.TrimSpace(req.Name), userID).Scan(&id)
+		INSERT INTO m_products (product_code,product_name,qc_image_data_url,created_by_user_id,updated_by_user_id)
+		VALUES ($1,$2,$3,$4,$4) RETURNING id
+	`, strings.ToUpper(strings.TrimSpace(req.Code)), strings.TrimSpace(req.Name), image, userID).Scan(&id)
 	if err != nil {
 		fail(c, http.StatusConflict, fmt.Errorf("product code already exists or data is invalid"))
 		return
@@ -192,9 +198,10 @@ func (s *Server) createProduct(c *gin.Context) {
 }
 
 type productUpdateRequest struct {
-	Code     string `json:"code"`
-	Name     string `json:"name" binding:"required"`
-	IsActive bool   `json:"is_active"`
+	Code           string  `json:"code"`
+	Name           string  `json:"name" binding:"required"`
+	IsActive       bool    `json:"is_active"`
+	QCImageDataURL *string `json:"qc_image_data_url"`
 }
 
 func (s *Server) updateProduct(c *gin.Context) {
@@ -208,13 +215,25 @@ func (s *Server) updateProduct(c *gin.Context) {
 		fail(c, 400, err)
 		return
 	}
+	var image any
+	updateImage := false
+	if req.QCImageDataURL != nil {
+		var imageErr *qcImageError
+		image, imageErr = normalizeQCImage(*req.QCImageDataURL)
+		if imageErr != nil {
+			fail(c, imageErr.status, imageErr.err)
+			return
+		}
+		updateImage = true
+	}
 	userID, _ := c.Get("auth_user_id")
 	tag, err := s.db.Exec(c, `
 		UPDATE m_products
 		SET product_code=COALESCE(NULLIF($2,''),product_code),product_name=$3,is_active=$4,
-		    updated_by_user_id=$5,updated_at=NOW()
+		    qc_image_data_url=CASE WHEN $5 THEN $6 ELSE qc_image_data_url END,
+		    updated_by_user_id=$7,updated_at=NOW()
 		WHERE id=$1
-	`, id, strings.ToUpper(strings.TrimSpace(req.Code)), strings.TrimSpace(req.Name), req.IsActive, userID)
+	`, id, strings.ToUpper(strings.TrimSpace(req.Code)), strings.TrimSpace(req.Name), req.IsActive, updateImage, image, userID)
 	if err != nil || tag.RowsAffected() != 1 {
 		fail(c, 404, fmt.Errorf("product not found"))
 		return
@@ -255,6 +274,25 @@ func (s *Server) updateProductQCImage(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"id": id, "has_qc_image": image != ""})
+}
+
+type qcImageError struct {
+	status int
+	err    error
+}
+
+func normalizeQCImage(raw string) (any, *qcImageError) {
+	image := strings.TrimSpace(raw)
+	if image == "" {
+		return nil, nil
+	}
+	if !strings.HasPrefix(image, "data:image/jpeg;base64,") && !strings.HasPrefix(image, "data:image/png;base64,") && !strings.HasPrefix(image, "data:image/webp;base64,") {
+		return nil, &qcImageError{status: 400, err: fmt.Errorf("QC image must be JPEG, PNG, or WebP")}
+	}
+	if len(image) > 7*1024*1024 {
+		return nil, &qcImageError{status: http.StatusRequestEntityTooLarge, err: fmt.Errorf("QC image exceeds the 5 MB limit")}
+	}
+	return image, nil
 }
 
 func (s *Server) listPackagingConfigs(c *gin.Context) {

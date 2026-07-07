@@ -338,6 +338,43 @@ func (s *Server) getQCSession(c *gin.Context) {
 	c.JSON(200, gin.H{"id": id, "session_code": sessionCode, "tray_code": trayCode, "production_order_number": po, "so_number": so, "product_code": productCode, "product_name": productName, "qc_image_data_url": qcImage, "actual_qty": qty, "inspected_qty": inspected, "ok_qty": okQty, "ng_qty": ngQty, "remaining_qty": qty - inspected, "status": status})
 }
 
+func (s *Server) listActiveQCSessions(c *gin.Context) {
+	rows, err := s.db.Query(c, `
+		SELECT qs.id,qs.session_code,t.tray_code,po.production_order_number,so.so_number,
+		       p.product_code,p.product_name,p.qc_image_data_url,qs.actual_qty,qs.inspected_qty,qs.status,
+		       COUNT(pu.id) FILTER (WHERE pu.initial_result='PASS'),
+		       COUNT(pu.id) FILTER (WHERE pu.initial_result='REJECT')
+		FROM t_qc_sessions qs
+		JOIN m_trays t ON t.id=qs.tray_id
+		JOIN t_production_orders po ON po.id=qs.production_order_id
+		JOIN t_sales_order_lines sol ON sol.id=po.sales_order_line_id
+		JOIN t_sales_orders so ON so.id=sol.sales_order_id
+		JOIN m_products p ON p.id=sol.product_id
+		LEFT JOIN t_pre_laser_units pu ON pu.qc_session_id=qs.id
+		WHERE qs.status IN ('QC_IN_PROGRESS','AWAITING_OUTPUT_TRAYS')
+		GROUP BY qs.id,t.id,po.id,so.id,p.id
+		ORDER BY qs.started_at DESC
+	`)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	defer rows.Close()
+	items := make([]gin.H, 0)
+	for rows.Next() {
+		var id int64
+		var sessionCode, trayCode, po, so, productCode, productName, status string
+		var qcImage *string
+		var qty, inspected, okQty, ngQty int
+		if err = rows.Scan(&id, &sessionCode, &trayCode, &po, &so, &productCode, &productName, &qcImage, &qty, &inspected, &status, &okQty, &ngQty); err != nil {
+			fail(c, 500, err)
+			return
+		}
+		items = append(items, gin.H{"id": id, "session_code": sessionCode, "tray_code": trayCode, "production_order_number": po, "so_number": so, "product_code": productCode, "product_name": productName, "qc_image_data_url": qcImage, "actual_qty": qty, "inspected_qty": inspected, "ok_qty": okQty, "ng_qty": ngQty, "remaining_qty": qty - inspected, "status": status})
+	}
+	c.JSON(200, gin.H{"items": items})
+}
+
 type evaluateSessionRequest struct {
 	Result string `json:"result" binding:"required"`
 	Reason string `json:"reason"`

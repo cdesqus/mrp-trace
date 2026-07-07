@@ -21,7 +21,7 @@ services:
     environment:
       DATABASE_URL: postgres://mrp:mrp@postgres:5432/mrp?sslmode=disable
       HTTP_ADDR: :8090
-      LASER_ADDR: host.docker.internal:9100
+      LASER_ADDR: SIMULATE_SUCCESS
       REWORK_PRINTER_ADDR: host.docker.internal:9101
       SMALL_BOX_PRINTER_ADDR: host.docker.internal:9102
       MASTER_BOX_PRINTER_ADDR: host.docker.internal:9103
@@ -36,6 +36,7 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_DEMO_MODE: "false"
+        API_URL: http://backend:8090
     environment:
       API_URL: http://backend:8090
       NEXT_PUBLIC_OPERATOR_ID: POC-OPERATOR
