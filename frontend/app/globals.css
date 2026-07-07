@@ -40,6 +40,7 @@ button { @apply disabled:cursor-not-allowed disabled:opacity-50; }
   @page { margin: 6mm; }
   .print-hidden { display: none !important; }
   body:has(.label-print-root) * { visibility: hidden !important; }
+  body:has(.label-print-root) *:has(.label-print-root),
   body:has(.label-print-root) .label-print-root,
   body:has(.label-print-root) .label-print-root * { visibility: visible !important; }
   body:has(.label-print-root) {
@@ -47,7 +48,8 @@ button { @apply disabled:cursor-not-allowed disabled:opacity-50; }
     background: white !important;
   }
   body:has(.label-print-root) .label-print-root {
-    position: fixed !important;
+    display: block !important;
+    position: absolute !important;
     left: 0 !important;
     top: 0 !important;
     width: 100mm !important;

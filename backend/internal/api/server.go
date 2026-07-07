@@ -53,6 +53,7 @@ func New(db *pgxpool.Pool) http.Handler {
 	api.GET("/qc/history", s.listQCHistory)
 	api.GET("/qc/setup/orders", s.listQCSetupOrders)
 	api.GET("/qc/v2/trays/:code/validate", s.validateQCTray)
+	api.GET("/qc/v2/rework-trays/active", s.listActiveReworkTrays)
 	api.POST("/qc/v2/rework-trays/:code/lock", s.lockReworkTray)
 	api.DELETE("/qc/v2/rework-trays/:code/lock", s.unlockReworkTray)
 	api.POST("/qc/sessions", s.createQCSession)

@@ -215,6 +215,44 @@ func (s *Server) lockReworkTray(c *gin.Context) {
 	c.JSON(200, gin.H{"tray_code": code, "status": "LOCKED_FOR_QC", "item_count": count})
 }
 
+func (s *Server) listActiveReworkTrays(c *gin.Context) {
+	_, station, ok := stationContext(c)
+	if !ok {
+		return
+	}
+	rows, err := s.db.Query(c, `
+		SELECT t.tray_code,l.locked_at,
+		       COUNT(pu.id) FILTER (WHERE pu.status='REWORK'),
+		       COUNT(pu.id) FILTER (WHERE pu.status='QC_PASSED_UNMARKED' AND pu.pass_tray_id IS NULL)
+		FROM t_rework_tray_locks l
+		JOIN m_trays t ON t.id=l.tray_id
+		LEFT JOIN t_pre_laser_units pu ON pu.rework_tray_id=l.tray_id
+			AND pu.status IN ('REWORK','QC_PASSED_UNMARKED')
+			AND pu.pass_tray_id IS NULL
+		WHERE l.station_id=$1
+		GROUP BY t.tray_code,l.locked_at
+		HAVING COUNT(pu.id) FILTER (WHERE pu.status IN ('REWORK','QC_PASSED_UNMARKED')) > 0
+		ORDER BY l.locked_at DESC
+	`, station)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	defer rows.Close()
+	items := make([]gin.H, 0)
+	for rows.Next() {
+		var trayCode string
+		var lockedAt time.Time
+		var openCount, stagedCount int
+		if err = rows.Scan(&trayCode, &lockedAt, &openCount, &stagedCount); err != nil {
+			fail(c, 500, err)
+			return
+		}
+		items = append(items, gin.H{"tray_code": trayCode, "locked_at": lockedAt, "open_count": openCount, "staged_count": stagedCount, "total_count": openCount + stagedCount})
+	}
+	c.JSON(200, gin.H{"items": items})
+}
+
 func (s *Server) unlockReworkTray(c *gin.Context) {
 	_, station, ok := stationContext(c)
 	if !ok {
@@ -856,7 +894,15 @@ func (s *Server) createPreQCFlowLaserBatch(c *gin.Context) {
 		fail(c, 409, fmt.Errorf("Laser input requires a PASS tray"))
 		return
 	}
-	rows, err := tx.Query(c, `SELECT id FROM t_pre_laser_units WHERE qc_session_id=$1 AND status='QC_PASSED_UNMARKED' AND (($2='DIRECT' AND initial_result='PASS') OR ($2='REWORK' AND initial_result='REJECT')) ORDER BY inspected_at,id FOR UPDATE`, req.QCSessionID, req.SourceType)
+	rows, err := tx.Query(c, `
+		SELECT id FROM t_pre_laser_units
+		WHERE qc_session_id=$1
+		  AND status='QC_PASSED_UNMARKED'
+		  AND pass_tray_id=$3
+		  AND (($2='DIRECT' AND initial_result='PASS') OR ($2='REWORK' AND initial_result='REJECT'))
+		ORDER BY inspected_at,id
+		FOR UPDATE
+	`, req.QCSessionID, req.SourceType, carrierTrayID)
 	if err != nil {
 		fail(c, 500, err)
 		return
