@@ -3,13 +3,15 @@
 @tailwind utilities;
 
 :root { color-scheme: light; }
-body { @apply m-0 bg-slate-50 text-slate-900 antialiased; }
+body { @apply m-0 bg-[#f7f9fc] text-slate-900 antialiased; }
 button, a, input, select { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2; }
 button { @apply disabled:cursor-not-allowed disabled:opacity-50; }
-.card { @apply rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,.04),0_8px_24px_rgba(15,23,42,.04)]; }
-.field { @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-lg outline-none focus:border-blue-600; }
-.primary { @apply rounded-xl bg-blue-700 px-5 py-3 font-bold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md; }
-.danger { @apply rounded-xl bg-red-600 px-5 py-3 font-bold text-white hover:bg-red-700; }
+.card { @apply rounded-xl border border-slate-200/70 bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,.035),0_14px_34px_rgba(15,23,42,.045)]; }
+.field { @apply w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-base outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100; }
+.primary { @apply rounded-lg bg-blue-700 px-5 py-3 font-bold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md; }
+.danger { @apply rounded-lg bg-red-600 px-5 py-3 font-bold text-white hover:bg-red-700; }
+table th { @apply whitespace-nowrap font-black tracking-wide; }
+table td { @apply align-middle; }
 .sidebar-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(147, 197, 253, .55) transparent;

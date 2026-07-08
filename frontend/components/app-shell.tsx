@@ -217,7 +217,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const accessDenied=!!requestedItem&&!authUser.permissions.includes(requestedItem.permission);
 
   return (
-    <div className="flex min-h-screen overflow-hidden bg-slate-50">
+    <div className="flex min-h-screen overflow-hidden bg-[#f7f9fc]">
       <aside className={`print-hidden shrink-0 overflow-hidden bg-blue-950 text-white shadow-xl transition-[width] duration-300 ease-in-out ${sidebarOpen ? "w-72" : "w-0"}`}>
         <div className="flex h-screen w-72 flex-col">
           <div className="flex h-20 items-center justify-between border-b border-white/10 px-5">

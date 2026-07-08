@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -48,6 +49,19 @@ type createQCSessionRequest struct {
 	ActualQty         int    `json:"actual_qty" binding:"required"`
 }
 
+func (s *Server) clearEmptyReworkTrayLock(ctx context.Context, trayID int64) {
+	_, _ = s.db.Exec(ctx, `
+		DELETE FROM t_rework_tray_locks
+		WHERE tray_id=$1
+		  AND NOT EXISTS (
+		      SELECT 1 FROM t_pre_laser_units
+		      WHERE rework_tray_id=$1
+		        AND status IN ('REWORK','QC_PASSED_UNMARKED')
+		        AND pass_tray_id IS NULL
+		  )
+	`, trayID)
+}
+
 func (s *Server) validateQCTray(c *gin.Context) {
 	code := strings.ToUpper(strings.TrimSpace(c.Param("code")))
 	purpose := strings.ToUpper(strings.TrimSpace(c.DefaultQuery("purpose", "SOURCE")))
@@ -62,6 +76,7 @@ func (s *Server) validateQCTray(c *gin.Context) {
 		fail(c, 404, fmt.Errorf("tray %s is not registered or inactive", code))
 		return
 	}
+	s.clearEmptyReworkTrayLock(c, trayID)
 	expectedType := map[string]string{"SOURCE": "SOURCE", "PASS": "PASS", "REWORK": "REWORK", "OUTPUT_REWORK": "REWORK"}[purpose]
 	if trayType != "GENERAL" && trayType != expectedType {
 		fail(c, 409, fmt.Errorf("tray %s is type %s; this step requires a %s tray", code, trayType, expectedType))
@@ -104,12 +119,13 @@ func (s *Server) validateQCTray(c *gin.Context) {
 		var locked, busyOther, incompatible bool
 		var existingQty int
 		err = s.db.QueryRow(c, `
-			SELECT EXISTS(SELECT 1 FROM t_rework_tray_locks WHERE tray_id=$1),
+			SELECT EXISTS(SELECT 1 FROM t_rework_tray_locks WHERE tray_id=$1)
+			       AND EXISTS(SELECT 1 FROM t_pre_laser_units WHERE rework_tray_id=$1 AND status IN ('REWORK','QC_PASSED_UNMARKED') AND pass_tray_id IS NULL),
 			       EXISTS(
 			           SELECT 1 FROM t_qc_sessions WHERE tray_id=$1 AND status IN ('QC_IN_PROGRESS','AWAITING_OUTPUT_TRAYS')
 			       ) OR EXISTS(
 			           SELECT 1 FROM t_pre_laser_units
-			           WHERE pass_tray_id=$1 AND status IN ('QC_PASSED_UNMARKED','LASER_RESERVED')
+			           WHERE pass_tray_id=$1 AND status='QC_PASSED_UNMARKED'
 			       ),
 			       EXISTS(
 			           SELECT 1 FROM t_pre_laser_units existing
@@ -149,7 +165,7 @@ func (s *Server) validateQCTray(c *gin.Context) {
 			WHERE tray_id=$1 AND status IN ('QC_IN_PROGRESS','AWAITING_OUTPUT_TRAYS')
 		) OR EXISTS (
 			SELECT 1 FROM t_pre_laser_units
-			WHERE (pass_tray_id=$1 AND status IN ('QC_PASSED_UNMARKED','LASER_RESERVED'))
+			WHERE (pass_tray_id=$1 AND status='QC_PASSED_UNMARKED')
 			   OR (rework_tray_id=$1 AND status='REWORK')
 			   OR (rework_tray_id=$1 AND status='QC_PASSED_UNMARKED' AND pass_tray_id IS NULL)
 		)
@@ -294,6 +310,7 @@ func (s *Server) createQCSession(c *gin.Context) {
 		fail(c, 409, fmt.Errorf("tray label is not registered or inactive"))
 		return
 	}
+	s.clearEmptyReworkTrayLock(c, trayID)
 	if trayType != "GENERAL" && trayType != "SOURCE" {
 		fail(c, 409, fmt.Errorf("Initial QC requires a SOURCE tray; scanned tray is %s", trayType))
 		return
@@ -305,7 +322,7 @@ func (s *Server) createQCSession(c *gin.Context) {
 			WHERE tray_id=$1 AND status IN ('QC_IN_PROGRESS','AWAITING_OUTPUT_TRAYS')
 		) OR EXISTS (
 			SELECT 1 FROM t_pre_laser_units
-			WHERE (pass_tray_id=$1 AND status IN ('QC_PASSED_UNMARKED','LASER_RESERVED'))
+			WHERE (pass_tray_id=$1 AND status='QC_PASSED_UNMARKED')
 			   OR (rework_tray_id=$1 AND status='REWORK')
 			   OR (rework_tray_id=$1 AND status='QC_PASSED_UNMARKED' AND pass_tray_id IS NULL)
 		)
@@ -538,11 +555,12 @@ func (s *Server) finishQCSession(c *gin.Context) {
 		if allowReworkPool {
 			var locked, incompatible bool
 			err = tx.QueryRow(c, `
-				SELECT EXISTS(SELECT 1 FROM t_rework_tray_locks WHERE tray_id=$1),
+				SELECT EXISTS(SELECT 1 FROM t_rework_tray_locks WHERE tray_id=$1)
+				       AND EXISTS(SELECT 1 FROM t_pre_laser_units WHERE rework_tray_id=$1 AND status IN ('REWORK','QC_PASSED_UNMARKED') AND pass_tray_id IS NULL),
 				       EXISTS(
 				           SELECT 1 FROM t_qc_sessions WHERE tray_id=$1 AND id<>$3 AND status IN ('QC_IN_PROGRESS','AWAITING_OUTPUT_TRAYS')
 				       ) OR EXISTS(
-				           SELECT 1 FROM t_pre_laser_units WHERE pass_tray_id=$1 AND status IN ('QC_PASSED_UNMARKED','LASER_RESERVED')
+				           SELECT 1 FROM t_pre_laser_units WHERE pass_tray_id=$1 AND status='QC_PASSED_UNMARKED'
 				       ),
 				       EXISTS(
 				           SELECT 1 FROM t_pre_laser_units existing
@@ -572,7 +590,7 @@ func (s *Server) finishQCSession(c *gin.Context) {
 				WHERE tray_id=$1 AND id<>$2 AND status IN ('QC_IN_PROGRESS','AWAITING_OUTPUT_TRAYS')
 			) OR EXISTS (
 				SELECT 1 FROM t_pre_laser_units
-				WHERE (pass_tray_id=$1 AND status IN ('QC_PASSED_UNMARKED','LASER_RESERVED'))
+				WHERE (pass_tray_id=$1 AND status='QC_PASSED_UNMARKED')
 				   OR (rework_tray_id=$1 AND status='REWORK')
 				   OR (rework_tray_id=$1 AND status='QC_PASSED_UNMARKED' AND pass_tray_id IS NULL)
 			)
@@ -795,7 +813,7 @@ func (s *Server) finishReworkBatch(c *gin.Context) {
 			WHERE tray_id=$1 AND status IN ('QC_IN_PROGRESS','AWAITING_OUTPUT_TRAYS')
 		) OR EXISTS (
 			SELECT 1 FROM t_pre_laser_units
-			WHERE (pass_tray_id=$1 AND status IN ('QC_PASSED_UNMARKED','LASER_RESERVED'))
+			WHERE (pass_tray_id=$1 AND status='QC_PASSED_UNMARKED')
 			   OR (rework_tray_id=$1 AND status='REWORK')
 			   OR (rework_tray_id=$1 AND status='QC_PASSED_UNMARKED' AND pass_tray_id IS NULL)
 		)

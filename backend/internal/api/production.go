@@ -87,11 +87,20 @@ func (s *Server) updateMasterTray(c *gin.Context) {
 		fail(c, 400, fmt.Errorf("tray type must be SOURCE, PASS, or REWORK"))
 		return
 	}
+	s.clearEmptyReworkTrayLock(c, id)
 	var busy bool
 	err = s.db.QueryRow(c, `
 		SELECT EXISTS(
 			SELECT 1 FROM t_tray_cycles WHERE tray_id=$1 AND status IN ('IN_PRODUCTION','WAITING_QC','QC_PROCESS')
-			UNION ALL SELECT 1 FROM t_rework_tray_locks WHERE tray_id=$1
+			UNION ALL
+			SELECT 1 FROM t_rework_tray_locks
+			WHERE tray_id=$1
+			  AND EXISTS (
+			      SELECT 1 FROM t_pre_laser_units
+			      WHERE rework_tray_id=$1
+			        AND status IN ('REWORK','QC_PASSED_UNMARKED')
+			        AND pass_tray_id IS NULL
+			  )
 		)
 	`, id).Scan(&busy)
 	if err != nil {
