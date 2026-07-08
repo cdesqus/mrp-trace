@@ -272,7 +272,7 @@ func (s *Server) unlockReworkTray(c *gin.Context) {
 }
 
 func (s *Server) createQCSession(c *gin.Context) {
-	operator, _, ok := stationContext(c)
+	operator, station, ok := stationContext(c)
 	if !ok {
 		return
 	}
@@ -331,7 +331,7 @@ func (s *Server) createQCSession(c *gin.Context) {
 	}
 	var sessionID int64
 	sessionCode := "QCS-" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:12])
-	err = tx.QueryRow(c, `INSERT INTO t_qc_sessions (session_code,tray_id,tray_cycle_id,production_order_id,actual_qty,operator_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, sessionCode, trayID, trayCycleID, req.ProductionOrderID, req.ActualQty, operator).Scan(&sessionID)
+	err = tx.QueryRow(c, `INSERT INTO t_qc_sessions (session_code,tray_id,tray_cycle_id,production_order_id,actual_qty,operator_id,started_station_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, sessionCode, trayID, trayCycleID, req.ProductionOrderID, req.ActualQty, operator, station).Scan(&sessionID)
 	if err == nil {
 		_, err = tx.Exec(c, `INSERT INTO t_pre_laser_units (qc_session_id,inspection_sequence) SELECT $1,generate_series(1,$2)`, sessionID, req.ActualQty)
 	}
@@ -355,12 +355,17 @@ func (s *Server) getQCSession(c *gin.Context) {
 		fail(c, 400, err)
 		return
 	}
-	var sessionCode, trayCode, po, so, productCode, productName, status string
+	var sessionCode, trayCode, po, so, productCode, productName, status, operator string
 	var qcImage *string
+	var startedStation, completedBy, completedStation, finalizedBy, finalizedStation *string
+	var startedAt time.Time
+	var completedAt, finalizedAt *time.Time
 	var qty, inspected, okQty, ngQty int
 	err = s.db.QueryRow(c, `
 		SELECT qs.session_code,t.tray_code,po.production_order_number,so.so_number,p.product_code,p.product_name,p.qc_image_data_url,
-		       qs.actual_qty,qs.inspected_qty,qs.status,
+		       qs.actual_qty,qs.inspected_qty,qs.status,qs.operator_id,qs.started_station_id,qs.started_at,
+		       qs.completed_by_operator_id,qs.completed_station_id,qs.completed_at,
+		       qs.finalized_by_operator_id,qs.finalized_station_id,qs.finalized_at,
 		       COUNT(pu.id) FILTER (WHERE pu.initial_result='PASS'),
 		       COUNT(pu.id) FILTER (WHERE pu.initial_result='REJECT')
 		FROM t_qc_sessions qs JOIN m_trays t ON t.id=qs.tray_id
@@ -368,18 +373,19 @@ func (s *Server) getQCSession(c *gin.Context) {
 		JOIN t_sales_order_lines sol ON sol.id=po.sales_order_line_id JOIN t_sales_orders so ON so.id=sol.sales_order_id
 		JOIN m_products p ON p.id=sol.product_id LEFT JOIN t_pre_laser_units pu ON pu.qc_session_id=qs.id
 		WHERE qs.id=$1 GROUP BY qs.id,t.id,po.id,so.id,p.id
-	`, id).Scan(&sessionCode, &trayCode, &po, &so, &productCode, &productName, &qcImage, &qty, &inspected, &status, &okQty, &ngQty)
+	`, id).Scan(&sessionCode, &trayCode, &po, &so, &productCode, &productName, &qcImage, &qty, &inspected, &status, &operator, &startedStation, &startedAt, &completedBy, &completedStation, &completedAt, &finalizedBy, &finalizedStation, &finalizedAt, &okQty, &ngQty)
 	if err != nil {
 		fail(c, 404, fmt.Errorf("QC session not found"))
 		return
 	}
-	c.JSON(200, gin.H{"id": id, "session_code": sessionCode, "tray_code": trayCode, "production_order_number": po, "so_number": so, "product_code": productCode, "product_name": productName, "qc_image_data_url": qcImage, "actual_qty": qty, "inspected_qty": inspected, "ok_qty": okQty, "ng_qty": ngQty, "remaining_qty": qty - inspected, "status": status})
+	c.JSON(200, gin.H{"id": id, "session_code": sessionCode, "tray_code": trayCode, "production_order_number": po, "so_number": so, "product_code": productCode, "product_name": productName, "qc_image_data_url": qcImage, "actual_qty": qty, "inspected_qty": inspected, "ok_qty": okQty, "ng_qty": ngQty, "remaining_qty": qty - inspected, "status": status, "operator_id": operator, "started_station_id": startedStation, "started_at": startedAt, "completed_by_operator_id": completedBy, "completed_station_id": completedStation, "completed_at": completedAt, "finalized_by_operator_id": finalizedBy, "finalized_station_id": finalizedStation, "finalized_at": finalizedAt})
 }
 
 func (s *Server) listActiveQCSessions(c *gin.Context) {
 	rows, err := s.db.Query(c, `
 		SELECT qs.id,qs.session_code,t.tray_code,po.production_order_number,so.so_number,
 		       p.product_code,p.product_name,p.qc_image_data_url,qs.actual_qty,qs.inspected_qty,qs.status,
+		       qs.operator_id,qs.started_station_id,qs.started_at,qs.completed_by_operator_id,qs.completed_station_id,qs.completed_at,
 		       COUNT(pu.id) FILTER (WHERE pu.initial_result='PASS'),
 		       COUNT(pu.id) FILTER (WHERE pu.initial_result='REJECT')
 		FROM t_qc_sessions qs
@@ -401,14 +407,17 @@ func (s *Server) listActiveQCSessions(c *gin.Context) {
 	items := make([]gin.H, 0)
 	for rows.Next() {
 		var id int64
-		var sessionCode, trayCode, po, so, productCode, productName, status string
+		var sessionCode, trayCode, po, so, productCode, productName, status, operator string
 		var qcImage *string
+		var startedStation, completedBy, completedStation *string
+		var startedAt time.Time
+		var completedAt *time.Time
 		var qty, inspected, okQty, ngQty int
-		if err = rows.Scan(&id, &sessionCode, &trayCode, &po, &so, &productCode, &productName, &qcImage, &qty, &inspected, &status, &okQty, &ngQty); err != nil {
+		if err = rows.Scan(&id, &sessionCode, &trayCode, &po, &so, &productCode, &productName, &qcImage, &qty, &inspected, &status, &operator, &startedStation, &startedAt, &completedBy, &completedStation, &completedAt, &okQty, &ngQty); err != nil {
 			fail(c, 500, err)
 			return
 		}
-		items = append(items, gin.H{"id": id, "session_code": sessionCode, "tray_code": trayCode, "production_order_number": po, "so_number": so, "product_code": productCode, "product_name": productName, "qc_image_data_url": qcImage, "actual_qty": qty, "inspected_qty": inspected, "ok_qty": okQty, "ng_qty": ngQty, "remaining_qty": qty - inspected, "status": status})
+		items = append(items, gin.H{"id": id, "session_code": sessionCode, "tray_code": trayCode, "production_order_number": po, "so_number": so, "product_code": productCode, "product_name": productName, "qc_image_data_url": qcImage, "actual_qty": qty, "inspected_qty": inspected, "ok_qty": okQty, "ng_qty": ngQty, "remaining_qty": qty - inspected, "status": status, "operator_id": operator, "started_station_id": startedStation, "started_at": startedAt, "completed_by_operator_id": completedBy, "completed_station_id": completedStation, "completed_at": completedAt})
 	}
 	c.JSON(200, gin.H{"items": items})
 }
@@ -462,7 +471,7 @@ func (s *Server) evaluateQCSessionItem(c *gin.Context) {
 		_, err = tx.Exec(c, `UPDATE t_qc_sessions SET inspected_qty=inspected_qty+1 WHERE id=$1`, id)
 	}
 	if err == nil {
-		_, err = tx.Exec(c, `UPDATE t_qc_sessions SET status='AWAITING_OUTPUT_TRAYS',completed_at=NOW() WHERE id=$1 AND inspected_qty=actual_qty`, id)
+		_, err = tx.Exec(c, `UPDATE t_qc_sessions SET status='AWAITING_OUTPUT_TRAYS',completed_at=NOW(),completed_by_operator_id=$2,completed_station_id=$3 WHERE id=$1 AND inspected_qty=actual_qty`, id, operator, station)
 	}
 	if err != nil {
 		fail(c, 500, err)
@@ -480,6 +489,10 @@ func (s *Server) evaluateQCSessionItem(c *gin.Context) {
 }
 
 func (s *Server) finishQCSession(c *gin.Context) {
+	operator, station, ok := stationContext(c)
+	if !ok {
+		return
+	}
 	id, err := parseID(c.Param("id"))
 	if err != nil {
 		fail(c, 400, err)
@@ -599,7 +612,7 @@ func (s *Server) finishQCSession(c *gin.Context) {
 		fail(c, 500, err)
 		return
 	}
-	if _, err = tx.Exec(c, `UPDATE t_qc_sessions SET pass_tray_id=$2,rework_tray_id=$3,status='READY_FOR_LASER',finalized_at=NOW() WHERE id=$1`, id, passTrayID, reworkTrayID); err != nil {
+	if _, err = tx.Exec(c, `UPDATE t_qc_sessions SET pass_tray_id=$2,rework_tray_id=$3,status='READY_FOR_LASER',finalized_at=NOW(),finalized_by_operator_id=$4,finalized_station_id=$5 WHERE id=$1`, id, passTrayID, reworkTrayID, operator, station); err != nil {
 		fail(c, 500, err)
 		return
 	}
@@ -685,6 +698,9 @@ func (s *Server) listPreLaserQCHistory(c *gin.Context) {
 		SELECT pu.id,pu.inspection_sequence,pu.initial_result,pu.ng_reason,pu.rework_code,
 		       qs.session_code,source.tray_code,rework_tray.tray_code,pass_tray.tray_code,
 		       po.production_order_number,so.so_number,p.product_code,p.product_name,
+		       qs.operator_id,qs.started_station_id,qs.started_at,
+		       qs.completed_by_operator_id,qs.completed_station_id,qs.completed_at,
+		       qs.finalized_by_operator_id,qs.finalized_station_id,qs.finalized_at,
 		       CASE WHEN $1='INITIAL' THEN pu.initial_qc_operator_id ELSE pu.rework_qc_operator_id END,
 		       CASE WHEN $1='INITIAL' THEN pu.initial_qc_station_id ELSE pu.rework_qc_station_id END,
 		       CASE WHEN $1='INITIAL' THEN pu.inspected_at ELSE pu.rework_passed_at END
@@ -711,12 +727,14 @@ func (s *Server) listPreLaserQCHistory(c *gin.Context) {
 	for rows.Next() {
 		var id int64
 		var sequence int
-		var initialResult, sessionCode, sourceTray, productionOrder, soNumber, productCode, productName string
-		var reason, reworkCode, reworkTray, passTray, operator, station *string
-		var inspectedAt *time.Time
+		var initialResult, sessionCode, sourceTray, productionOrder, soNumber, productCode, productName, sessionOperator string
+		var reason, reworkCode, reworkTray, passTray, startedStation, completedBy, completedStation, finalizedBy, finalizedStation, operator, station *string
+		var startedAt time.Time
+		var completedAt, finalizedAt, inspectedAt *time.Time
 		if err = rows.Scan(&id, &sequence, &initialResult, &reason, &reworkCode, &sessionCode,
 			&sourceTray, &reworkTray, &passTray, &productionOrder, &soNumber, &productCode,
-			&productName, &operator, &station, &inspectedAt); err != nil {
+			&productName, &sessionOperator, &startedStation, &startedAt, &completedBy, &completedStation,
+			&completedAt, &finalizedBy, &finalizedStation, &finalizedAt, &operator, &station, &inspectedAt); err != nil {
 			fail(c, 500, err)
 			return
 		}
@@ -730,7 +748,12 @@ func (s *Server) listPreLaserQCHistory(c *gin.Context) {
 			"source_tray": sourceTray, "rework_tray": reworkTray, "pass_tray": passTray,
 			"production_order": productionOrder, "so_number": soNumber,
 			"product_code": productCode, "product_name": productName,
-			"operator_id": operator, "station_id": station, "inspected_at": inspectedAt,
+			"session_operator_id": sessionOperator, "started_station_id": startedStation,
+			"started_at": startedAt, "completed_by_operator_id": completedBy,
+			"completed_station_id": completedStation, "completed_at": completedAt,
+			"finalized_by_operator_id": finalizedBy, "finalized_station_id": finalizedStation,
+			"finalized_at": finalizedAt,
+			"operator_id":  operator, "station_id": station, "inspected_at": inspectedAt,
 		})
 	}
 	c.JSON(200, gin.H{"items": items, "stage": stage})
