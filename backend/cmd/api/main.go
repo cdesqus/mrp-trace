@@ -29,6 +29,9 @@ func main() {
 	if err := pool.Ping(ctx); err != nil {
 		log.Fatal(err)
 	}
+	if err := api.EnsureSchema(ctx, pool); err != nil {
+		log.Fatal(err)
+	}
 
 	devices := hardware.Devices{
 		"LASER":              env("LASER_ADDR", "127.0.0.1:9100"),
