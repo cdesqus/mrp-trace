@@ -29,6 +29,7 @@ const groups: NavGroup[] = [
       { href: "/master-data/products", label: "Products", icon: "product", permission:"master.view" },
       { href: "/master-data/packaging", label: "Packaging", icon: "configuration", permission:"master.view" },
       { href: "/master-data/trays", label: "Tray Labels", icon: "trays", permission:"master.view" },
+      { href: "/master-data/ng-categories", label: "NG Categories", icon: "quality", permission:"master.view" },
     ],
   },
   {

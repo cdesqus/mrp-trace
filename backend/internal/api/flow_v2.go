@@ -62,6 +62,19 @@ func (s *Server) clearEmptyReworkTrayLock(ctx context.Context, trayID int64) {
 	`, trayID)
 }
 
+func (s *Server) closeFinalizedTrayCycles(ctx context.Context, trayID int64) error {
+	_, err := s.db.Exec(ctx, `
+		UPDATE t_tray_cycles tc
+		SET status='COMPLETED',completed_at=COALESCE(tc.completed_at,NOW())
+		FROM t_qc_sessions qs
+		WHERE qs.tray_cycle_id=tc.id
+		  AND tc.tray_id=$1
+		  AND tc.status IN ('IN_PRODUCTION','WAITING_QC','QC_PROCESS')
+		  AND qs.status IN ('READY_FOR_LASER','LASER_COMPLETE','CANCELLED')
+	`, trayID)
+	return err
+}
+
 func (s *Server) activeTrayCycle(ctx context.Context, trayID int64) (code, status string, exists bool, err error) {
 	err = s.db.QueryRow(ctx, `
 		SELECT tray_cycle_code,status
@@ -76,6 +89,49 @@ func (s *Server) activeTrayCycle(ctx context.Context, trayID int64) (code, statu
 		return "", "", false, err
 	}
 	return code, status, true, nil
+}
+
+func (s *Server) sourceTrayBlocker(ctx context.Context, trayID int64, trayCode string) (string, bool, error) {
+	var session string
+	err := s.db.QueryRow(ctx, `
+		SELECT session_code
+		FROM t_qc_sessions
+		WHERE tray_id=$1 AND status IN ('QC_IN_PROGRESS','AWAITING_OUTPUT_TRAYS')
+		ORDER BY started_at DESC LIMIT 1
+	`, trayID).Scan(&session)
+	if err != nil && err != pgx.ErrNoRows {
+		return "", false, err
+	}
+	if err == nil {
+		return fmt.Sprintf("%s already has unfinished Initial QC (%s). Use Resume Active QC below.", trayCode, session), true, nil
+	}
+	var passWaiting int
+	if err = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM t_pre_laser_units WHERE pass_tray_id=$1 AND status='QC_PASSED_UNMARKED'`, trayID).Scan(&passWaiting); err != nil {
+		return "", false, err
+	}
+	if passWaiting > 0 {
+		return fmt.Sprintf("%s is currently a Pass Tray with %d items waiting for Laser. Open Laser Marking first.", trayCode, passWaiting), true, nil
+	}
+	var reworkWaiting int
+	if err = s.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM t_pre_laser_units
+		WHERE rework_tray_id=$1
+		  AND status IN ('REWORK','QC_PASSED_UNMARKED')
+		  AND pass_tray_id IS NULL
+	`, trayID).Scan(&reworkWaiting); err != nil {
+		return "", false, err
+	}
+	if reworkWaiting > 0 {
+		var locked bool
+		if err = s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM t_rework_tray_locks WHERE tray_id=$1)`, trayID).Scan(&locked); err != nil {
+			return "", false, err
+		}
+		if locked {
+			return fmt.Sprintf("%s is locked for Rework QC with %d items. Open Rework QC first.", trayCode, reworkWaiting), true, nil
+		}
+		return fmt.Sprintf("%s is currently a Rework Tray with %d items waiting. Open Rework QC first.", trayCode, reworkWaiting), true, nil
+	}
+	return "", false, nil
 }
 
 func (s *Server) validateQCTray(c *gin.Context) {
@@ -93,19 +149,30 @@ func (s *Server) validateQCTray(c *gin.Context) {
 		return
 	}
 	s.clearEmptyReworkTrayLock(c, trayID)
+	if err := s.closeFinalizedTrayCycles(c, trayID); err != nil {
+		fail(c, 500, err)
+		return
+	}
 	expectedType := map[string]string{"SOURCE": "SOURCE", "PASS": "PASS", "REWORK": "REWORK", "OUTPUT_REWORK": "REWORK"}[purpose]
 	if trayType != "GENERAL" && trayType != expectedType {
 		fail(c, 409, fmt.Errorf("tray %s is type %s; this step requires a %s tray", code, trayType, expectedType))
 		return
 	}
 	if purpose == "SOURCE" {
+		if message, blocked, err := s.sourceTrayBlocker(c, trayID, code); err != nil {
+			fail(c, 500, err)
+			return
+		} else if blocked {
+			fail(c, 409, fmt.Errorf("%s", message))
+			return
+		}
 		cycleCode, cycleStatus, exists, err := s.activeTrayCycle(c, trayID)
 		if err != nil {
 			fail(c, 500, err)
 			return
 		}
 		if exists {
-			fail(c, 409, fmt.Errorf("%s already has unfinished tray cycle %s (%s). Resume or finish the active QC session first", code, cycleCode, cycleStatus))
+			fail(c, 409, fmt.Errorf("%s has an unfinished tray cycle %s (%s). The system could not auto-close it; ask a supervisor to review this tray.", code, cycleCode, cycleStatus))
 			return
 		}
 	}
@@ -338,15 +405,26 @@ func (s *Server) createQCSession(c *gin.Context) {
 		return
 	}
 	s.clearEmptyReworkTrayLock(c, trayID)
+	if err = s.closeFinalizedTrayCycles(c, trayID); err != nil {
+		fail(c, 500, err)
+		return
+	}
 	if trayType != "GENERAL" && trayType != "SOURCE" {
 		fail(c, 409, fmt.Errorf("Initial QC requires a SOURCE tray; scanned tray is %s", trayType))
+		return
+	}
+	if message, blocked, err := s.sourceTrayBlocker(c, trayID, strings.ToUpper(strings.TrimSpace(req.TrayCode))); err != nil {
+		fail(c, 500, err)
+		return
+	} else if blocked {
+		fail(c, http.StatusConflict, fmt.Errorf("%s", message))
 		return
 	}
 	if cycleCode, cycleStatus, exists, err := s.activeTrayCycle(c, trayID); err != nil {
 		fail(c, 500, err)
 		return
 	} else if exists {
-		fail(c, http.StatusConflict, fmt.Errorf("%s already has unfinished tray cycle %s (%s). Resume or finish the active QC session first", strings.ToUpper(strings.TrimSpace(req.TrayCode)), cycleCode, cycleStatus))
+		fail(c, http.StatusConflict, fmt.Errorf("%s has an unfinished tray cycle %s (%s). The system could not auto-close it; ask a supervisor to review this tray.", strings.ToUpper(strings.TrimSpace(req.TrayCode)), cycleCode, cycleStatus))
 		return
 	}
 	var occupied bool
@@ -378,7 +456,7 @@ func (s *Server) createQCSession(c *gin.Context) {
 	err = tx.QueryRow(c, `INSERT INTO t_tray_cycles (tray_cycle_code,tray_id,production_order_id,cycle_number,planned_qty,operator_id,status) VALUES ($1,$2,$3,$4,$5,$6,'QC_PROCESS') RETURNING id`, code, trayID, req.ProductionOrderID, cycle, req.ActualQty, operator).Scan(&trayCycleID)
 	if err != nil {
 		if strings.Contains(err.Error(), "uq_tray_active_cycle") {
-			fail(c, http.StatusConflict, fmt.Errorf("%s already has unfinished QC. Resume or finish the active QC session first", strings.ToUpper(strings.TrimSpace(req.TrayCode))))
+			fail(c, http.StatusConflict, fmt.Errorf("%s already has unfinished Initial QC. Use Resume Active QC below.", strings.ToUpper(strings.TrimSpace(req.TrayCode))))
 			return
 		}
 		fail(c, 409, err)
@@ -478,8 +556,9 @@ func (s *Server) listActiveQCSessions(c *gin.Context) {
 }
 
 type evaluateSessionRequest struct {
-	Result string `json:"result" binding:"required"`
-	Reason string `json:"reason"`
+	Result       string `json:"result" binding:"required"`
+	Reason       string `json:"reason"`
+	NGCategoryID int64  `json:"ng_category_id"`
 }
 
 func (s *Server) evaluateQCSessionItem(c *gin.Context) {
@@ -493,7 +572,7 @@ func (s *Server) evaluateQCSessionItem(c *gin.Context) {
 		return
 	}
 	var req evaluateSessionRequest
-	if err = c.ShouldBindJSON(&req); err != nil || (req.Result != "PASS" && req.Result != "REJECT") || (req.Result == "REJECT" && strings.TrimSpace(req.Reason) == "") {
+	if err = c.ShouldBindJSON(&req); err != nil || (req.Result != "PASS" && req.Result != "REJECT") || (req.Result == "REJECT" && req.NGCategoryID <= 0) {
 		fail(c, 400, fmt.Errorf("select a valid QC result and NG category"))
 		return
 	}
@@ -512,13 +591,18 @@ func (s *Server) evaluateQCSessionItem(c *gin.Context) {
 	}
 	var reworkCode *string
 	if req.Result == "PASS" {
-		_, err = tx.Exec(c, `UPDATE t_pre_laser_units SET status='QC_PASSED_UNMARKED',initial_result='PASS',qc_operator_id=$2,initial_qc_operator_id=$2,initial_qc_station_id=$3,inspected_at=NOW() WHERE id=$1`, unitID, operator, station)
+		_, err = tx.Exec(c, `UPDATE t_pre_laser_units SET status='QC_PASSED_UNMARKED',initial_result='PASS',ng_category_id=NULL,ng_reason=NULL,qc_operator_id=$2,initial_qc_operator_id=$2,initial_qc_station_id=$3,inspected_at=NOW() WHERE id=$1`, unitID, operator, station)
 	} else {
+		var reason string
+		if err = tx.QueryRow(c, `SELECT category_name FROM m_ng_categories WHERE id=$1 AND is_active`, req.NGCategoryID).Scan(&reason); err != nil {
+			fail(c, 409, fmt.Errorf("selected NG category is inactive or not found"))
+			return
+		}
 		code := fmt.Sprintf("RW-%010d", unitID)
 		reworkCode = &code
-		_, err = tx.Exec(c, `UPDATE t_pre_laser_units SET status='REWORK',initial_result='REJECT',rework_code=$2,ng_reason=$3,qc_operator_id=$4,initial_qc_operator_id=$4,initial_qc_station_id=$5,inspected_at=NOW() WHERE id=$1`, unitID, code, strings.TrimSpace(req.Reason), operator, station)
+		_, err = tx.Exec(c, `UPDATE t_pre_laser_units SET status='REWORK',initial_result='REJECT',rework_code=$2,ng_category_id=$3,ng_reason=$4,qc_operator_id=$5,initial_qc_operator_id=$5,initial_qc_station_id=$6,inspected_at=NOW() WHERE id=$1`, unitID, code, req.NGCategoryID, reason, operator, station)
 		if err == nil {
-			payload := fmt.Sprintf("^XA^FO30,25^A0N,32,32^FDREWORK^FS^FO30,70^BY2^BCN,70,Y,N,N^FD%s^FS^FO30,175^A0N,22,22^FD%s^FS^XZ", code, strings.TrimSpace(req.Reason))
+			payload := fmt.Sprintf("^XA^FO30,25^A0N,32,32^FDREWORK^FS^FO30,70^BY2^BCN,70,Y,N,N^FD%s^FS^FO30,175^A0N,22,22^FD%s^FS^XZ", code, reason)
 			_, err = tx.Exec(c, `INSERT INTO t_print_jobs(idempotency_key,entity_type,entity_id,station_id,device_role,payload) VALUES($1,'REWORK',$2,$3,'REWORK_PRINTER',$4)`, uuid.New(), unitID, station, payload)
 		}
 	}
@@ -669,6 +753,17 @@ func (s *Server) finishQCSession(c *gin.Context) {
 		return
 	}
 	if _, err = tx.Exec(c, `UPDATE t_qc_sessions SET pass_tray_id=$2,rework_tray_id=$3,status='READY_FOR_LASER',finalized_at=NOW(),finalized_by_operator_id=$4,finalized_station_id=$5 WHERE id=$1`, id, passTrayID, reworkTrayID, operator, station); err != nil {
+		fail(c, 500, err)
+		return
+	}
+	if _, err = tx.Exec(c, `
+		UPDATE t_tray_cycles tc
+		SET status='COMPLETED',completed_at=COALESCE(tc.completed_at,NOW())
+		FROM t_qc_sessions qs
+		WHERE qs.tray_cycle_id=tc.id
+		  AND qs.id=$1
+		  AND tc.status IN ('IN_PRODUCTION','WAITING_QC','QC_PROCESS')
+	`, id); err != nil {
 		fail(c, 500, err)
 		return
 	}

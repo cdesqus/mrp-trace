@@ -15,6 +15,7 @@ type MockStore = {
     lines: Array<{ product_id: number; packaging_config_id: number; quantity: number }>;
   }>;
   trays: Array<{ id: number; tray_code: string; tray_type: "GENERAL" | "SOURCE" | "PASS" | "REWORK"; is_active?: boolean; created_at?: string; updated_at?: string; created_by?: string; updated_by?: string }>;
+  ngCategories: Array<{ id: number; code: string; name: string; description: string; sort_order: number; is_active: boolean; created_at?: string; updated_at?: string; created_by?: string; updated_by?: string }>;
   activity: Array<{id:number;action:string;entity_type:string;entity_id:string|null;module:string;created_at:string;user:{full_name:string;username:string}}>;
   reworkTrayLocks: string[];
   authUsers: Array<{id:number;username:string;password:string;full_name:string;email:string|null;is_active:boolean;roles:string[];must_change_password:boolean;last_login_at:string|null;created_at:string}>;
@@ -99,6 +100,14 @@ function initialStore(): MockStore {
       { id: 3, tray_code: "TRAY-003", tray_type: "REWORK" },
       { id: 4, tray_code: "TRAY-004", tray_type: "REWORK" },
     ],
+    ngCategories: [
+      { id: 20, code: "SCRATCH_DENT", name: "Visual Scratch / Dent", description: "Visible scratch, dent, or cosmetic damage.", sort_order: 10, is_active: true },
+      { id: 21, code: "DIMENSION_OOS", name: "Dimension Out of Spec", description: "Part dimension is outside the approved tolerance.", sort_order: 20, is_active: true },
+      { id: 22, code: "FUNCTION_FAIL", name: "Functional Test Failed", description: "Part failed functional or fit test.", sort_order: 30, is_active: true },
+      { id: 23, code: "ASSEMBLY_DEFECT", name: "Assembly Defect", description: "Assembly is incomplete, loose, reversed, or incorrect.", sort_order: 40, is_active: true },
+      { id: 24, code: "CONTAMINATION", name: "Contamination", description: "Oil, dust, foreign material, or other contamination found.", sort_order: 50, is_active: true },
+      { id: 25, code: "MARKING_DEFECT", name: "Marking Defect", description: "Label, marking, print, or identification issue.", sort_order: 60, is_active: true },
+    ],
     activity: [],
     reworkTrayLocks: [],
     authUsers: [{id:1,username:"admin",password:"password",full_name:"System Administrator",email:"admin@local",is_active:true,roles:["ADMIN"],must_change_password:true,last_login_at:null,created_at:new Date().toISOString()}],
@@ -132,6 +141,7 @@ function read(): MockStore {
       packaging: saved.packaging ?? defaults.packaging,
       salesOrders: saved.salesOrders ?? defaults.salesOrders,
       trays: (saved.trays ?? defaults.trays).map((tray,index)=>({...tray,tray_type:tray.tray_type??(["SOURCE","PASS","REWORK","REWORK"][index]??"GENERAL")})),
+      ngCategories: saved.ngCategories ?? defaults.ngCategories,
       activity: saved.activity ?? defaults.activity,
       reworkTrayLocks: saved.reworkTrayLocks ?? defaults.reworkTrayLocks,
       authUsers: saved.authUsers ?? defaults.authUsers,
@@ -253,6 +263,33 @@ export async function mockApi<T>(path: string, init?: RequestInit): Promise<T> {
     const item = store.customers.find((entry) => entry.id === Number(customerMatch[1]));
     if (!item) throw new Error("Customer not found.");
     const body = jsonBody(init); item.code=String(body.code??item.code).toUpperCase();item.name = String(body.name ?? item.name); item.is_active = Boolean(body.is_active);item.updated_at=new Date().toISOString();item.updated_by=store.authUsers.find(user=>user.id===Number(window.localStorage.getItem(demoSessionKey)))?.full_name??"Demo Operator";write(store);
+    return { id: item.id } as T;
+  }
+
+  if (url.pathname === "/api/master/ng-categories" && method === "GET") {
+    const includeInactive = url.searchParams.get("include_inactive") === "true";
+    return { items: store.ngCategories.filter((item) => includeInactive || item.is_active).sort((a,b)=>a.sort_order-b.sort_order||a.name.localeCompare(b.name)) } as T;
+  }
+  if (url.pathname === "/api/master/ng-categories" && method === "POST") {
+    const body = jsonBody(init);
+    const name = String(body.name ?? "").trim();
+    const code = String(body.code || name).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!name) throw new Error("NG category name is required.");
+    if (!code) throw new Error("NG category code is required.");
+    if (store.ngCategories.some((item) => item.code === code)) throw new Error("NG category code already exists.");
+    const actor=store.authUsers.find(user=>user.id===Number(window.localStorage.getItem(demoSessionKey)))?.full_name??"Demo Operator";const now=new Date().toISOString();
+    const item={id:store.nextId++,code,name,description:String(body.description??""),sort_order:Number(body.sort_order||100),is_active:true,created_at:now,updated_at:now,created_by:actor,updated_by:actor};
+    store.ngCategories.push(item);write(store);return{id:item.id} as T;
+  }
+  const ngCategoryMatch = url.pathname.match(/^\/api\/master\/ng-categories\/(\d+)$/);
+  if (ngCategoryMatch && method === "PATCH") {
+    const item = store.ngCategories.find((entry) => entry.id === Number(ngCategoryMatch[1]));
+    if (!item) throw new Error("NG category not found.");
+    const body = jsonBody(init);
+    const nextName=String(body.name??item.name).trim();
+    const nextCode=String(body.code||nextName).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (store.ngCategories.some((entry)=>entry.id!==item.id&&entry.code===nextCode)) throw new Error("NG category code already exists.");
+    item.code=nextCode;item.name=nextName;item.description=String(body.description??item.description??"");item.sort_order=Number(body.sort_order||item.sort_order||100);item.is_active=Boolean(body.is_active);item.updated_at=new Date().toISOString();item.updated_by=store.authUsers.find(user=>user.id===Number(window.localStorage.getItem(demoSessionKey)))?.full_name??"Demo Operator";write(store);
     return { id: item.id } as T;
   }
 
@@ -666,10 +703,11 @@ export async function mockApi<T>(path: string, init?: RequestInit): Promise<T> {
     const item = store.preLaserItems.find((candidate) => candidate.qc_session_id === session.id && candidate.status === "QC_PENDING");
     if (!item) throw new Error("QC Session has no remaining item.");
     const result = String(body.result);
-    if (result === "REJECT" && !String(body.reason ?? "").trim()) throw new Error("Select an NG category.");
+    const ngCategory = result === "REJECT" ? store.ngCategories.find((category) => category.id === Number(body.ng_category_id) && category.is_active) : null;
+    if (result === "REJECT" && !ngCategory) throw new Error("Select an active NG category.");
     item.initial_result = result === "REJECT" ? "REJECT" : "PASS";
     item.status = result === "REJECT" ? "REWORK" : "QC_PASSED_UNMARKED";
-    item.ng_reason = result === "REJECT" ? String(body.reason) : null;
+    item.ng_reason = result === "REJECT" ? ngCategory?.name ?? null : null;
     item.rework_code = result === "REJECT" ? `RW-${String(item.id).padStart(10, "0")}` : null;
     item.inspected_at = new Date().toISOString();
     session.inspected_qty++;
