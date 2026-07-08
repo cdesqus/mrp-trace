@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -110,6 +113,266 @@ func (s *Server) assignMasterBox(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"delivery_order_id": doID, "master_box_code": req.MasterBoxCode})
+}
+
+func (s *Server) listDeliveryAvailableMasterBoxes(c *gin.Context) {
+	doID, err := parseID(c.Param("id"))
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	rows, err := s.db.Query(c, `
+		SELECT mb.id,mb.master_box_code,mb.actual_small_box_qty,mb.actual_unit_qty,mb.packed_at,
+		       po.production_order_number,p.product_code,p.product_name
+		FROM t_delivery_orders d
+		JOIN t_sales_orders so ON so.id=d.sales_order_id
+		JOIN t_sales_order_lines sol ON sol.sales_order_id=so.id
+		JOIN m_products p ON p.id=sol.product_id
+		JOIN t_production_orders po ON po.sales_order_line_id=sol.id
+		JOIN t_master_boxes mb ON mb.production_order_id=po.id
+		LEFT JOIN t_delivery_order_master_boxes domb ON domb.master_box_id=mb.id
+		WHERE d.id=$1 AND d.status IN ('OPEN','READY') AND mb.status='LOCKED' AND domb.master_box_id IS NULL
+		ORDER BY mb.packed_at,mb.id
+	`, doID)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	defer rows.Close()
+	items := make([]gin.H, 0)
+	for rows.Next() {
+		var id int64
+		var code, po, productCode, productName string
+		var smallBoxes, units int
+		var packedAt time.Time
+		if err = rows.Scan(&id, &code, &smallBoxes, &units, &packedAt, &po, &productCode, &productName); err != nil {
+			fail(c, 500, err)
+			return
+		}
+		items = append(items, gin.H{
+			"id": id, "master_box_code": code, "actual_small_box_qty": smallBoxes,
+			"actual_unit_qty": units, "packed_at": packedAt, "production_order_number": po,
+			"product_code": productCode, "product_name": productName,
+		})
+	}
+	c.JSON(200, gin.H{"items": items})
+}
+
+func (s *Server) autoAssignDeliveryMasterBoxes(c *gin.Context) {
+	doID, err := parseID(c.Param("id"))
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	tag, err := s.db.Exec(c, `
+		WITH candidates AS (
+			SELECT mb.id
+			FROM t_delivery_orders d
+			JOIN t_sales_orders so ON so.id=d.sales_order_id
+			JOIN t_sales_order_lines sol ON sol.sales_order_id=so.id
+			JOIN t_production_orders po ON po.sales_order_line_id=sol.id
+			JOIN t_master_boxes mb ON mb.production_order_id=po.id
+			LEFT JOIN t_delivery_order_master_boxes domb ON domb.master_box_id=mb.id
+			WHERE d.id=$1 AND d.status IN ('OPEN','READY') AND mb.status='LOCKED' AND domb.master_box_id IS NULL
+			ORDER BY mb.packed_at,mb.id
+		), inserted AS (
+			INSERT INTO t_delivery_order_master_boxes (delivery_order_id,master_box_id)
+			SELECT $1,id FROM candidates
+			ON CONFLICT DO NOTHING
+			RETURNING master_box_id
+		)
+		UPDATE t_delivery_orders
+		SET status='READY'
+		WHERE id=$1 AND EXISTS (SELECT 1 FROM inserted)
+	`, doID)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	c.JSON(200, gin.H{"delivery_order_id": doID, "updated": tag.RowsAffected()})
+}
+
+func (s *Server) shipDeliveryOrder(c *gin.Context) {
+	doID, err := parseID(c.Param("id"))
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	tx, err := s.db.Begin(c)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	defer tx.Rollback(c)
+	var assigned int
+	if err = tx.QueryRow(c, `SELECT COUNT(*) FROM t_delivery_order_master_boxes WHERE delivery_order_id=$1`, doID).Scan(&assigned); err != nil {
+		fail(c, 500, err)
+		return
+	}
+	if assigned == 0 {
+		fail(c, 409, fmt.Errorf("assign at least one Master Box before Delivery Out"))
+		return
+	}
+	if _, err = tx.Exec(c, `
+		UPDATE t_master_boxes mb
+		SET status='DELIVERED'
+		FROM t_delivery_order_master_boxes domb
+		WHERE domb.master_box_id=mb.id AND domb.delivery_order_id=$1
+	`, doID); err != nil {
+		fail(c, 500, err)
+		return
+	}
+	tag, err := tx.Exec(c, `UPDATE t_delivery_orders SET status='SHIPPED' WHERE id=$1 AND status IN ('OPEN','READY')`, doID)
+	if err != nil || tag.RowsAffected() != 1 {
+		fail(c, 409, fmt.Errorf("delivery order cannot be shipped"))
+		return
+	}
+	if err = tx.Commit(c); err != nil {
+		fail(c, 500, err)
+		return
+	}
+	c.JSON(200, gin.H{"delivery_order_id": doID, "status": "SHIPPED", "master_box_qty": assigned})
+}
+
+func (s *Server) deliveryOrderPDF(c *gin.Context) {
+	doID, err := parseID(c.Param("id"))
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	var doNumber, status, soNumber, customerCode, customerName string
+	var deliveryDate time.Time
+	err = s.db.QueryRow(c, `
+		SELECT d.do_number,d.delivery_date,d.status,so.so_number,c.customer_code,c.customer_name
+		FROM t_delivery_orders d
+		JOIN t_sales_orders so ON so.id=d.sales_order_id
+		JOIN m_customers c ON c.id=so.customer_id
+		WHERE d.id=$1
+	`, doID).Scan(&doNumber, &deliveryDate, &status, &soNumber, &customerCode, &customerName)
+	if err != nil {
+		fail(c, 404, fmt.Errorf("delivery order not found"))
+		return
+	}
+	rows, err := s.db.Query(c, `
+		SELECT mb.master_box_code,mb.actual_small_box_qty,mb.actual_unit_qty,
+		       po.production_order_number,p.product_code,mb.packed_at
+		FROM t_delivery_order_master_boxes domb
+		JOIN t_master_boxes mb ON mb.id=domb.master_box_id
+		JOIN t_production_orders po ON po.id=mb.production_order_id
+		JOIN t_sales_order_lines sol ON sol.id=po.sales_order_line_id
+		JOIN m_products p ON p.id=sol.product_id
+		WHERE domb.delivery_order_id=$1
+		ORDER BY domb.assigned_at,mb.id
+	`, doID)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	defer rows.Close()
+	lines := []string{
+		"DELIVERY OUT MANIFEST",
+		"DO Number      : " + doNumber,
+		"Sales Order    : " + soNumber,
+		"Customer       : " + customerCode + " - " + customerName,
+		"Delivery Date  : " + deliveryDate.Format("02 Jan 2006"),
+		"Status         : " + status,
+		"Generated At   : " + time.Now().Format("02 Jan 2006 15:04"),
+		"",
+		"Master Box List",
+		"No | Master Box | Product | PO | Small Boxes | FG Qty | Packed At",
+	}
+	totalBoxes, totalUnits := 0, 0
+	index := 1
+	for rows.Next() {
+		var code, po, product string
+		var smallBoxes, units int
+		var packedAt time.Time
+		if err = rows.Scan(&code, &smallBoxes, &units, &po, &product, &packedAt); err != nil {
+			fail(c, 500, err)
+			return
+		}
+		totalBoxes += smallBoxes
+		totalUnits += units
+		lines = append(lines, fmt.Sprintf("%02d | %s | %s | %s | %d | %d | %s", index, code, product, po, smallBoxes, units, packedAt.Format("02 Jan 15:04")))
+		index++
+	}
+	lines = append(lines, "", fmt.Sprintf("TOTAL MASTER BOX : %d", index-1), fmt.Sprintf("TOTAL SMALL BOX  : %d", totalBoxes), fmt.Sprintf("TOTAL FG QTY     : %d", totalUnits), "", "Prepared By: ____________________", "Received By: ____________________")
+	pdf := simpleTextPDF(lines)
+	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s.pdf"`, doNumber))
+	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+func simpleTextPDF(lines []string) []byte {
+	const maxLines = 45
+	chunks := make([][]string, 0)
+	for start := 0; start < len(lines); start += maxLines {
+		end := start + maxLines
+		if end > len(lines) {
+			end = len(lines)
+		}
+		chunks = append(chunks, lines[start:end])
+	}
+	if len(chunks) == 0 {
+		chunks = append(chunks, []string{"Delivery Out Manifest"})
+	}
+
+	var buf bytes.Buffer
+	offsets := []int{0}
+	buf.WriteString("%PDF-1.4\n")
+	writeObj := func(id int, body string) {
+		offsets = append(offsets, buf.Len())
+		fmt.Fprintf(&buf, "%d 0 obj\n%s\nendobj\n", id, body)
+	}
+	kids := make([]string, 0, len(chunks))
+	for page := range chunks {
+		kids = append(kids, fmt.Sprintf("%d 0 R", 4+page*2))
+	}
+	writeObj(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	writeObj(2, fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), len(chunks)))
+	writeObj(3, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	for page, pageLines := range chunks {
+		pageObj := 4 + page*2
+		contentObj := pageObj + 1
+		writeObj(pageObj, fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>", contentObj))
+		var content bytes.Buffer
+		content.WriteString("BT /F1 10 Tf 42 800 Td 14 TL\n")
+		for _, line := range pageLines {
+			content.WriteString("(")
+			content.WriteString(escapePDFText(line))
+			content.WriteString(") Tj T*\n")
+		}
+		content.WriteString("ET")
+		body := fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", content.Len(), content.String())
+		writeObj(contentObj, body)
+	}
+	xrefAt := buf.Len()
+	fmt.Fprintf(&buf, "xref\n0 %d\n0000000000 65535 f \n", len(offsets))
+	for _, offset := range offsets[1:] {
+		fmt.Fprintf(&buf, "%010d 00000 n \n", offset)
+	}
+	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%s\n%%%%EOF", len(offsets), strconv.Itoa(xrefAt))
+	return buf.Bytes()
+}
+
+func escapePDFText(value string) string {
+	value = strings.NewReplacer("→", "->", "—", "-", "·", "-", "Â", "", "â", "").Replace(value)
+	var builder strings.Builder
+	for _, r := range value {
+		switch r {
+		case '\\', '(', ')':
+			builder.WriteByte('\\')
+			builder.WriteRune(r)
+		case '\n', '\r', '\t':
+			builder.WriteByte(' ')
+		default:
+			if r >= 32 && r <= 126 {
+				builder.WriteRune(r)
+			} else {
+				builder.WriteByte('?')
+			}
+		}
+	}
+	return builder.String()
 }
 
 func (s *Server) traceSerial(c *gin.Context) {

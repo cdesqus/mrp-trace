@@ -50,3 +50,12 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return body as T;
 }
+
+export async function apiBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const response = await fetch(path, { ...init, headers: { ...stationHeaders, ...init?.headers } });
+  if (!response.ok) {
+    const rawBody = await response.text();
+    throw new Error(rawBody || `Request failed with status ${response.status}.`);
+  }
+  return response.blob();
+}

@@ -109,7 +109,7 @@ export default function PackingPage() {
     }
   }
 
-  useHardwareScanner((code) => { if (tab === "master") void scanBox(code.trim()); }, tab === "master" && !busy);
+  useHardwareScanner((code) => { if (tab === "master") void scanBox(code.trim()); }, tab === "master" && !busy && !smallBoxLabel && !masterBoxLabel);
 
   async function lockMaster(items = boxes) {
     if (!items.length) return;
@@ -145,8 +145,8 @@ export default function PackingPage() {
   return (
     <ModulePage eyebrow="Logistics & Packing" title="Packing Operations" description="Stage fixed consecutive serial groups, complete pending rework, then lock Small and Master Boxes.">
       <div className="mb-5 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-        <button className={`rounded-lg px-5 py-2.5 text-sm font-bold transition ${tab === "small" ? "bg-blue-700 text-white shadow" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => setTab("small")}>Small Box Queue</button>
-        <button className={`rounded-lg px-5 py-2.5 text-sm font-bold transition ${tab === "master" ? "bg-blue-700 text-white shadow" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => setTab("master")}>Master Box Scanner</button>
+        <button className={`rounded-lg px-5 py-2.5 text-sm font-bold transition ${tab === "small" ? "bg-blue-700 text-white shadow" : "text-slate-600 hover:bg-slate-50"}`} disabled={!!smallBoxLabel || !!masterBoxLabel} onClick={() => setTab("small")}>Small Box Queue</button>
+        <button className={`rounded-lg px-5 py-2.5 text-sm font-bold transition ${tab === "master" ? "bg-blue-700 text-white shadow" : "text-slate-600 hover:bg-slate-50"}`} disabled={!!smallBoxLabel || !!masterBoxLabel} onClick={() => setTab("master")}>Master Box Scanner</button>
       </div>
       {message && <div className={`mb-5 rounded-xl border p-4 text-sm font-medium ${/error|must|already|unavailable|incomplete/i.test(message) ? "border-red-200 bg-red-50 text-red-700" : "border-blue-200 bg-blue-50 text-blue-800"}`}>{message}</div>}
 
@@ -168,7 +168,7 @@ export default function PackingPage() {
                         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 font-black text-emerald-700">{index + 1}</span>
                         <div><div className="flex flex-wrap items-center gap-2"><h3 className="font-black">{group.production_order}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">Group {group.group_number}</span><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">{group.passed_qty} / {group.quantity} OK</span></div><p className="mt-2 font-mono text-lg font-bold text-blue-950">{group.serial_from} → {group.serial_to}</p><p className="mt-1 text-sm text-slate-500">{group.quantity} consecutive FG ready for final box lock.</p></div>
                       </div>
-                      <button className="primary shrink-0" disabled={busy} onClick={() => void lockSmall(group)}>Lock Small Box</button>
+                      <button className="primary shrink-0" disabled={busy || !!smallBoxLabel || !!masterBoxLabel} onClick={() => void lockSmall(group)}>Lock Small Box</button>
                     </article>
                   ))}
                   {!readyGroups.length && <EmptyState title="No groups ready to lock" text="Completed groups move here automatically." />}
@@ -215,7 +215,7 @@ export default function PackingPage() {
         <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
           <section className="card min-h-[470px]">
             <div className="flex flex-col justify-between gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-center"><div><p className="text-xs font-bold uppercase tracking-wider text-blue-700">Hardware Scanner Active</p><h2 className="mt-1 text-xl font-black">Scan Small Box Labels</h2></div><p className="text-4xl font-black text-blue-900">{boxes.length} <span className="text-xl text-slate-400">/ {capacity || "—"}</span></p></div>
-            <div className="mt-5 flex gap-2"><input autoFocus className="field min-w-0 font-mono text-base uppercase" placeholder="Scan or enter Small Box QR (SB-...)" value={scanInput} onChange={event=>setScanInput(event.target.value)} onKeyDown={event=>{if(event.key==="Enter")void scanBox(scanInput)}}/><button className="primary shrink-0" disabled={busy||!scanInput.trim()} onClick={()=>void scanBox(scanInput)}>Add Box</button></div>
+            <div className="mt-5 flex gap-2"><input autoFocus className="field min-w-0 font-mono text-base uppercase" placeholder="Scan or enter Small Box QR (SB-...)" value={scanInput} disabled={!!smallBoxLabel || !!masterBoxLabel} onChange={event=>setScanInput(event.target.value)} onKeyDown={event=>{if(event.key==="Enter")void scanBox(scanInput)}}/><button className="primary shrink-0" disabled={busy||!scanInput.trim() || !!smallBoxLabel || !!masterBoxLabel} onClick={()=>void scanBox(scanInput)}>Add Box</button></div>
             {!!capacity&&<div className="mt-4"><div className="mb-1 flex justify-between text-xs font-bold text-slate-500"><span>Master Box Progress</span><span>{boxes.length} / {capacity}</span></div><div className="h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600 transition-[width]" style={{width:`${Math.min(100,boxes.length/capacity*100)}%`}}/></div></div>}
             {!!capacity&&boxes.length>0&&boxes.length<capacity&&<div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">Partial Master Box mode: lock manually when this is the remaining shipment quantity.</div>}
             <div className="mt-5 grid gap-3 md:grid-cols-2">{boxes.map((box, index) => <article className="rounded-2xl border border-slate-200 p-4" key={box.box_code}><div className="flex items-start justify-between"><span className="rounded-lg bg-blue-50 px-2 py-1 text-xs font-black text-blue-700">#{index + 1}</span><button className="text-xs font-bold text-red-600 hover:underline" onClick={() => setBoxes((current) => current.filter((item) => item.box_code !== box.box_code))}>Remove</button></div><p className="mt-3 font-mono font-black">{box.box_code}</p><p className="mt-1 text-sm text-slate-500">{box.serial_from} → {box.serial_to}</p><p className="mt-1 text-xs text-slate-400">{box.actual_qty} FG</p></article>)}</div>
@@ -229,8 +229,8 @@ export default function PackingPage() {
           <aside className="card h-fit"><h3 className="font-black">Master Box Summary</h3><dl className="mt-5 space-y-4 text-sm"><div className="flex justify-between"><dt className="text-slate-500">Production Order</dt><dd className="font-bold">{boxes[0]?.production_order_number ?? "—"}</dd></div><div className="flex justify-between"><dt className="text-slate-500">Product</dt><dd className="font-bold">{boxes[0]?.product_code ?? "—"}</dd></div><div className="flex justify-between"><dt className="text-slate-500">Small Boxes</dt><dd className="font-bold">{boxes.length}{capacity?` / ${capacity}`:""}</dd></div><div className="flex justify-between"><dt className="text-slate-500">Total FG</dt><dd className="font-bold">{unitTotal}</dd></div><div className="flex justify-between"><dt className="text-slate-500">Box Type</dt><dd className={`font-black ${boxes.length&&capacity&&boxes.length<capacity?"text-amber-700":"text-emerald-700"}`}>{boxes.length&&capacity&&boxes.length<capacity?"PARTIAL":boxes.length?"FULL":"—"}</dd></div></dl><button className="primary mt-6 w-full" disabled={!capacity||!boxes.length||boxes.length>capacity||busy} onClick={() => void lockMaster()}>{busy ? "Processing…" : boxes.length===capacity&&capacity>0 ? "Lock Full Master Box" : boxes.length ? "Lock Partial Master Box" : "Scan Small Box First"}</button><button className="mt-3 w-full rounded-xl py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-50" disabled={!boxes.length || busy} onClick={() => setBoxes((current) => current.slice(0, -1))}>Undo Last Scan</button>{lastMasterBoxLabel&&<button className="mt-3 w-full rounded-xl border border-blue-200 py-2.5 text-sm font-black text-blue-700 hover:bg-blue-50" onClick={()=>setMasterBoxLabel(lastMasterBoxLabel)}>Reprint Last Master Label</button>}</aside>
         </div>
       )}
-      {smallBoxLabel&&<SmallBoxLabel box={smallBoxLabel} onClose={()=>setSmallBoxLabel(null)}/>}
-      {masterBoxLabel&&<MasterBoxLabel label={masterBoxLabel} onClose={()=>setMasterBoxLabel(null)}/>}
+      {smallBoxLabel&&<SmallBoxLabel box={smallBoxLabel} onConfirm={()=>setSmallBoxLabel(null)}/>}
+      {masterBoxLabel&&<MasterBoxLabel label={masterBoxLabel} onConfirm={()=>setMasterBoxLabel(null)}/>}
     </ModulePage>
   );
 }
@@ -259,7 +259,7 @@ function playScanTone(kind:"scan"|"success"|"error") {
   } catch {}
 }
 
-function SmallBoxLabel({box,onClose}:{box:SmallBox;onClose:()=>void}) {
+function SmallBoxLabel({box,onConfirm}:{box:SmallBox;onConfirm:()=>void}) {
   const [qr,setQr]=useState("");
   useEffect(()=>{void QRCode.toDataURL(box.box_code,{errorCorrectionLevel:"M",margin:1,width:320,color:{dark:"#020617",light:"#ffffff"}}).then(setQr)},[box.box_code]);
   return <div className="fixed inset-0 z-[170] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm">
@@ -281,13 +281,14 @@ function SmallBoxLabel({box,onClose}:{box:SmallBox;onClose:()=>void}) {
           <div className="flex flex-col items-center justify-center border-l border-slate-300 pl-4">{qr?<img alt={`QR ${box.box_code}`} className="h-36 w-36" src={qr}/>:<div className="h-36 w-36 animate-pulse bg-slate-100"/>}<p className="mt-2 break-all text-center font-mono text-sm font-black">{box.box_code}</p><p className="mt-1 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500">Scan Box ID</p></div>
         </div>
       </div>
-      <p className="mt-4 text-center text-xs text-slate-500">QR payload: <span className="font-mono font-bold">{box.box_code}</span></p>
-      <div className="mt-5 flex gap-3 print:hidden"><button className="flex-1 rounded-xl border py-3 font-black" onClick={onClose}>Close</button><button className="primary flex-1" disabled={!qr} onClick={()=>window.print()}>Print / Reprint Label</button></div>
+      <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center text-sm font-bold text-amber-800 print:hidden">Print this label and attach it to the physical Small Box before continuing.</div>
+      <p className="mt-3 text-center text-xs text-slate-500">QR payload: <span className="font-mono font-bold">{box.box_code}</span></p>
+      <div className="mt-5 flex gap-3 print:hidden"><button className="flex-1 rounded-xl border py-3 font-black" disabled={!qr} onClick={()=>window.print()}>Print / Reprint Label</button><button className="primary flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={onConfirm}>Confirm Label Attached</button></div>
     </section>
   </div>;
 }
 
-function MasterBoxLabel({label,onClose}:{label:MasterBoxLabelData;onClose:()=>void}) {
+function MasterBoxLabel({label,onConfirm}:{label:MasterBoxLabelData;onConfirm:()=>void}) {
   const [qr,setQr]=useState("");
   useEffect(()=>{void QRCode.toDataURL(label.master_box_code,{errorCorrectionLevel:"M",margin:1,width:320,color:{dark:"#020617",light:"#ffffff"}}).then(setQr)},[label.master_box_code]);
   return <div className="fixed inset-0 z-[175] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm">
@@ -305,8 +306,9 @@ function MasterBoxLabel({label,onClose}:{label:MasterBoxLabelData;onClose:()=>vo
           <div className="flex flex-col items-center justify-center border-l border-slate-300 pl-4">{qr?<img alt={`QR ${label.master_box_code}`} className="h-40 w-40" src={qr}/>:<div className="h-40 w-40 animate-pulse bg-slate-100"/>}<p className="mt-2 break-all text-center font-mono text-sm font-black">{label.master_box_code}</p><p className="mt-1 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500">Scan Master Box ID</p></div>
         </div>
       </div>
-      <p className="mt-4 text-center text-xs text-slate-500">QR payload: <span className="font-mono font-bold">{label.master_box_code}</span></p>
-      <div className="mt-5 flex gap-3 print:hidden"><button className="flex-1 rounded-xl border py-3 font-black" onClick={onClose}>Close</button><button className="primary flex-1" disabled={!qr} onClick={()=>window.print()}>Print / Reprint Master Label</button></div>
+      <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center text-sm font-bold text-amber-800 print:hidden">Print this label and attach it to the physical Master Box before continuing.</div>
+      <p className="mt-3 text-center text-xs text-slate-500">QR payload: <span className="font-mono font-bold">{label.master_box_code}</span></p>
+      <div className="mt-5 flex gap-3 print:hidden"><button className="flex-1 rounded-xl border py-3 font-black" disabled={!qr} onClick={()=>window.print()}>Print / Reprint Master Label</button><button className="primary flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={onConfirm}>Confirm Label Attached</button></div>
     </section>
   </div>;
 }
