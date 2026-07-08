@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ModulePage } from "@/components/module-page";
 import { api } from "@/lib/api";
 import { useHardwareScanner } from "@/hooks/use-hardware-scanner";
+import { useSearchParams } from "next/navigation";
 
 type FinishedGood={
   id:number;master_box_code:string;small_box_qty:number;unit_qty:number;packed_at:string;
@@ -15,8 +16,9 @@ type BoxDetail={box_code:string;qty:number;packed_at:string;serial_from:string;s
 type FinishedGoodDetail=FinishedGood&{small_boxes:BoxDetail[]};
 
 export default function FinishedGoodsPage(){
+  const searchParams=useSearchParams();
   const [items,setItems]=useState<FinishedGood[]>([]);
-  const [query,setQuery]=useState("");
+  const [query,setQuery]=useState(searchParams.get("search")??"");
   const [status,setStatus]=useState("ALL");
   const [selected,setSelected]=useState<FinishedGoodDetail|null>(null);
   const [loading,setLoading]=useState(true);
