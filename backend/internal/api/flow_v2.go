@@ -62,6 +62,22 @@ func (s *Server) clearEmptyReworkTrayLock(ctx context.Context, trayID int64) {
 	`, trayID)
 }
 
+func (s *Server) activeTrayCycle(ctx context.Context, trayID int64) (code, status string, exists bool, err error) {
+	err = s.db.QueryRow(ctx, `
+		SELECT tray_cycle_code,status
+		FROM t_tray_cycles
+		WHERE tray_id=$1 AND status IN ('IN_PRODUCTION','WAITING_QC','QC_PROCESS')
+		ORDER BY id DESC LIMIT 1
+	`, trayID).Scan(&code, &status)
+	if err == pgx.ErrNoRows {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return code, status, true, nil
+}
+
 func (s *Server) validateQCTray(c *gin.Context) {
 	code := strings.ToUpper(strings.TrimSpace(c.Param("code")))
 	purpose := strings.ToUpper(strings.TrimSpace(c.DefaultQuery("purpose", "SOURCE")))
@@ -81,6 +97,17 @@ func (s *Server) validateQCTray(c *gin.Context) {
 	if trayType != "GENERAL" && trayType != expectedType {
 		fail(c, 409, fmt.Errorf("tray %s is type %s; this step requires a %s tray", code, trayType, expectedType))
 		return
+	}
+	if purpose == "SOURCE" {
+		cycleCode, cycleStatus, exists, err := s.activeTrayCycle(c, trayID)
+		if err != nil {
+			fail(c, 500, err)
+			return
+		}
+		if exists {
+			fail(c, 409, fmt.Errorf("%s already has unfinished tray cycle %s (%s). Resume or finish the active QC session first", code, cycleCode, cycleStatus))
+			return
+		}
 	}
 	if purpose == "REWORK" {
 		var count int
@@ -315,6 +342,13 @@ func (s *Server) createQCSession(c *gin.Context) {
 		fail(c, 409, fmt.Errorf("Initial QC requires a SOURCE tray; scanned tray is %s", trayType))
 		return
 	}
+	if cycleCode, cycleStatus, exists, err := s.activeTrayCycle(c, trayID); err != nil {
+		fail(c, 500, err)
+		return
+	} else if exists {
+		fail(c, http.StatusConflict, fmt.Errorf("%s already has unfinished tray cycle %s (%s). Resume or finish the active QC session first", strings.ToUpper(strings.TrimSpace(req.TrayCode)), cycleCode, cycleStatus))
+		return
+	}
 	var occupied bool
 	if err = tx.QueryRow(c, `
 		SELECT EXISTS (
@@ -343,6 +377,10 @@ func (s *Server) createQCSession(c *gin.Context) {
 	var trayCycleID int64
 	err = tx.QueryRow(c, `INSERT INTO t_tray_cycles (tray_cycle_code,tray_id,production_order_id,cycle_number,planned_qty,operator_id,status) VALUES ($1,$2,$3,$4,$5,$6,'QC_PROCESS') RETURNING id`, code, trayID, req.ProductionOrderID, cycle, req.ActualQty, operator).Scan(&trayCycleID)
 	if err != nil {
+		if strings.Contains(err.Error(), "uq_tray_active_cycle") {
+			fail(c, http.StatusConflict, fmt.Errorf("%s already has unfinished QC. Resume or finish the active QC session first", strings.ToUpper(strings.TrimSpace(req.TrayCode))))
+			return
+		}
 		fail(c, 409, err)
 		return
 	}
