@@ -69,10 +69,8 @@ export default function NGCategoriesPage() {
   }
 
   function newCategory() {
-    setEditing(null);
-    setForm(emptyForm);
+    reset();
     setCreateOpen(true);
-    setError("");
   }
 
   async function save(event: FormEvent) {
@@ -116,21 +114,6 @@ export default function NGCategoriesPage() {
   }
 
   return <ModulePage eyebrow="Master Data" title="NG Categories" description="Maintain reject categories used by QC operators." actions={<button className="primary" onClick={newCategory}>+ New NG Category</button>}>
-    {(createOpen || editing) && <section className="card">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div><p className="text-xs font-black uppercase tracking-wider text-blue-700">{editing ? "Edit Category" : "Create Category"}</p><h2 className="mt-1 text-xl font-black">{editing ? editing.name : "New NG Category"}</h2></div>
-        <button className="rounded-xl border px-4 py-2 text-sm font-bold" onClick={reset} type="button">{editing ? "Cancel Edit" : "Cancel"}</button>
-      </div>
-      <form className="grid gap-3 lg:grid-cols-[180px_1fr_1fr_120px_auto]" onSubmit={save}>
-        <input className="field uppercase" placeholder="CODE optional" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })}/>
-        <input className="field" placeholder="Category name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/>
-        <input className="field" placeholder="Description optional" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })}/>
-        <input className="field" min="1" placeholder="Order" type="number" value={form.sort_order} onChange={(event) => setForm({ ...form, sort_order: event.target.value })}/>
-        <button className="primary" disabled={busy || !form.name.trim()}>{busy ? "Saving..." : editing ? "Save Changes" : "Create"}</button>
-      </form>
-      {error && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
-    </section>}
-
     <section className="card mt-5 overflow-hidden p-0">
       <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center">
         <input className="field py-2.5 text-base" placeholder="Search NG categories..." value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -155,5 +138,19 @@ export default function NGCategoriesPage() {
       </div>
       {!loading && !rows.length && <div className="py-16 text-center"><h3 className="font-black">No NG categories found</h3><p className="mt-1 text-sm text-slate-500">Create categories so QC operators can reject parts consistently.</p></div>}
     </section>
+
+    {(createOpen || editing) && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) reset(); }}>
+      <form className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl" onSubmit={save}>
+        <header className="flex items-start justify-between gap-4 border-b p-6"><div><p className="text-xs font-black uppercase tracking-wider text-blue-700">{editing ? "Edit Category" : "Create Category"}</p><h2 className="mt-1 text-2xl font-black">{editing ? editing.name : "New NG Category"}</h2></div><button className="h-10 w-10 rounded-xl border font-black" onClick={reset} type="button">X</button></header>
+        <div className="space-y-4 p-6">
+          <label className="block text-sm font-bold">Code<input className="field mt-2 uppercase" placeholder="CODE optional" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} /></label>
+          <label className="block text-sm font-bold">Category Name<input autoFocus className="field mt-2" placeholder="Category name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+          <label className="block text-sm font-bold">Description<input className="field mt-2" placeholder="Description optional" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+          <label className="block text-sm font-bold">Sort Order<input className="field mt-2" min="1" placeholder="Order" type="number" value={form.sort_order} onChange={(event) => setForm({ ...form, sort_order: event.target.value })} /></label>
+          {error && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
+        </div>
+        <footer className="flex justify-end gap-3 border-t px-6 py-4"><button className="rounded-xl border px-5 py-3 font-bold" onClick={reset} type="button">Cancel</button><button className="primary" disabled={busy || !form.name.trim()}>{busy ? "Saving..." : editing ? "Save Changes" : "Create Category"}</button></footer>
+      </form>
+    </div>}
   </ModulePage>;
 }

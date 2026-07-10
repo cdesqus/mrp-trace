@@ -162,6 +162,7 @@ export default function DeliveryOrdersPage() {
       await api(`/api/delivery-orders/${selected.id}/ship`, { method: "POST" });
       setMessage(`${selected.do_number} shipped. Delivery Out PDF is ready.`);
       setAvailable([]);
+      setSelected(null);
       await load();
     } catch (error) {
       setMessage((error as Error).message);
@@ -257,7 +258,7 @@ export default function DeliveryOrdersPage() {
 
         {selected && (
           <div className="fixed inset-0 z-[90] bg-slate-950/35 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
-            <aside className="absolute right-0 top-0 flex h-full w-full max-w-6xl flex-col bg-slate-50 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+            <aside className="absolute right-0 top-0 flex h-full w-full max-w-5xl flex-col bg-slate-50 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
               <header className="flex items-start justify-between gap-4 border-b bg-white px-5 py-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Delivery Workspace</p>
@@ -266,8 +267,8 @@ export default function DeliveryOrdersPage() {
                 </div>
                 <button className="h-10 w-10 rounded-xl border border-slate-200 bg-white font-black text-slate-700 hover:bg-slate-50" onClick={() => setSelected(null)} title="Close" type="button">X</button>
               </header>
-              <div className="grid flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <section className="card">
+              <div className="grid flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <section className="card h-fit">
             <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Delivery Workspace</p>
             <h3 className="mt-2 text-2xl font-black">{selected.do_number}</h3>
                 <p className="mt-1 text-sm text-slate-500">{selected.customer_name} · {selected.so_number}</p>
@@ -295,7 +296,7 @@ export default function DeliveryOrdersPage() {
                 </div>
           </section>
 
-            <section className="card">
+            <section className="card h-fit">
               <div className="flex items-center justify-between">
                 <h3 className="font-black">Suggested Master Boxes</h3>
                 <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{available.length} ready</span>
