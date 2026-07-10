@@ -121,12 +121,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(pathname !== "/login");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
-    masterdata: true,
-    production: true,
-    quality: true,
-    logistics: true,
-    analytics: true,
-    settings: true,
+    masterdata: false,
+    production: false,
+    quality: false,
+    logistics: false,
+    analytics: false,
+    settings: false,
   });
   const navRef = useRef<HTMLElement>(null);
   const activeLinkRef = useRef<HTMLAnchorElement>(null);
@@ -142,11 +142,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setAuthLoading(true);
     void api<AuthUser>("/api/auth/me").then(setAuthUser).catch(() => { window.location.replace("/login"); }).finally(() => setAuthLoading(false));
   }, [authUser]);
-
-  useEffect(() => {
-    const activeGroup = groups.find((group) => group.children.some((item) => pathname.startsWith(item.href)));
-    if (activeGroup) setExpanded((current) => ({ ...current, [activeGroup.key]: true }));
-  }, [pathname]);
 
   useEffect(() => {
     const nav = navRef.current;

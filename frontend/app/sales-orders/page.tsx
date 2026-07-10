@@ -173,8 +173,8 @@ export default function SalesOrdersPage() {
       <section className="card mt-5 overflow-hidden p-0">
         <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center">
           <div className="relative flex-1">
-            <Icon name="search" className="absolute left-3.5 top-3.5 h-5 w-5 text-slate-400" />
-            <input className="field py-2.5 pl-11 text-base" placeholder="Search SO number or customer…" value={search} onChange={(event) => setSearch(event.target.value)} />
+            {!search && <Icon name="search" className="pointer-events-none absolute left-3.5 top-3.5 h-5 w-5 text-slate-400" />}
+            <input className={`field py-2.5 text-base transition-[padding] ${search ? "pl-4" : "pl-11"}`} placeholder="Search SO number or customer…" value={search} onChange={(event) => setSearch(event.target.value)} />
           </div>
           <select className="field py-2.5 text-base lg:w-52" value={status} onChange={(event) => setStatus(event.target.value)}>
             {statuses.map((item) => <option key={item} value={item}>{item || "All statuses"}</option>)}

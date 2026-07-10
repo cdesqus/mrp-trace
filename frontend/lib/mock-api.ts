@@ -590,7 +590,7 @@ export async function mockApi<T>(path: string, init?: RequestInit): Promise<T> {
       const product = store.products.find((item) => item.id === line.product_id);
       const started = store.qcSessions.filter((session) => session.production_order_id === id).reduce((sum, session) => sum + session.actual_qty, 0);
       return { production_order_id: id, production_order_number: `PO-${order.so_number}-${String(index + 1).padStart(2, "0")}`, so_number: order.so_number, product_code: product?.code ?? "UNKNOWN", product_name: product?.name ?? "Unknown Product", order_qty: line.quantity, started_qty: started };
-    }));
+    })).filter((item) => item.started_qty < item.order_qty);
     return { items } as T;
   }
 

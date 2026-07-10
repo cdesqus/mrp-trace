@@ -22,7 +22,9 @@ func (s *Server) listQCSetupOrders(c *gin.Context) {
 		JOIN m_products p ON p.id=sol.product_id
 		LEFT JOIN t_qc_sessions qs ON qs.production_order_id=po.id
 		WHERE po.status IN ('OPEN','IN_PROGRESS')
-		GROUP BY po.id,so.id,p.id ORDER BY po.created_at
+		GROUP BY po.id,so.id,p.id
+		HAVING po.planned_qty > COALESCE(SUM(qs.actual_qty) FILTER (WHERE qs.status<>'CANCELLED'),0)
+		ORDER BY po.created_at
 	`)
 	if err != nil {
 		fail(c, 500, err)
@@ -444,6 +446,33 @@ func (s *Server) createQCSession(c *gin.Context) {
 	}
 	if occupied {
 		fail(c, 409, fmt.Errorf("tray is still assigned to another active process"))
+		return
+	}
+	var plannedQty, startedQty int
+	if err = tx.QueryRow(c, `
+		SELECT po.planned_qty
+		FROM t_production_orders po
+		WHERE po.id=$1 AND po.status IN ('OPEN','IN_PROGRESS')
+		FOR UPDATE
+	`, req.ProductionOrderID).Scan(&plannedQty); err != nil {
+		fail(c, http.StatusConflict, fmt.Errorf("production order is unavailable for Initial QC"))
+		return
+	}
+	if err = tx.QueryRow(c, `
+		SELECT COALESCE(SUM(actual_qty) FILTER (WHERE status<>'CANCELLED'),0)
+		FROM t_qc_sessions
+		WHERE production_order_id=$1
+	`, req.ProductionOrderID).Scan(&startedQty); err != nil {
+		fail(c, 500, err)
+		return
+	}
+	remainingQty := plannedQty - startedQty
+	if remainingQty <= 0 {
+		fail(c, http.StatusConflict, fmt.Errorf("production order is already completed"))
+		return
+	}
+	if req.ActualQty > remainingQty {
+		fail(c, http.StatusConflict, fmt.Errorf("actual quantity exceeds remaining order quantity (%d)", remainingQty))
 		return
 	}
 	var cycle int
