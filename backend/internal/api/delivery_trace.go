@@ -28,7 +28,7 @@ func (s *Server) listDeliveryOrders(c *gin.Context) {
 		JOIN t_sales_orders so ON so.id=d.sales_order_id
 		JOIN m_customers c ON c.id=so.customer_id
 		LEFT JOIN (
-			SELECT sales_order_id,SUM(quantity) quantity
+			SELECT sales_order_id,SUM(order_qty) quantity
 			FROM t_sales_order_lines
 			GROUP BY sales_order_id
 		) order_qty ON order_qty.sales_order_id=so.id
@@ -262,7 +262,7 @@ func (s *Server) deliveryOrderPDF(c *gin.Context) {
 	var orderQty int
 	err = s.db.QueryRow(c, `
 		SELECT d.do_number,d.delivery_date,d.status,so.so_number,c.customer_code,c.customer_name,
-		       COALESCE((SELECT SUM(quantity) FROM t_sales_order_lines WHERE sales_order_id=so.id),0)
+		       COALESCE((SELECT SUM(order_qty) FROM t_sales_order_lines WHERE sales_order_id=so.id),0)
 		FROM t_delivery_orders d
 		JOIN t_sales_orders so ON so.id=d.sales_order_id
 		JOIN m_customers c ON c.id=so.customer_id
