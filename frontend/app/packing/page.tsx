@@ -69,7 +69,6 @@ export default function PackingPage() {
   const [busy, setBusy] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [scanInput, setScanInput] = useState("");
-  const [availableSearch, setAvailableSearch] = useState("");
   const [selectedProductionOrder, setSelectedProductionOrder] = useState<string | null>(null);
   const [smallBoxLabel, setSmallBoxLabel] = useState<SmallBox | null>(null);
   const [lastSmallBoxLabel, setLastSmallBoxLabel] = useState<SmallBox | null>(null);
@@ -165,15 +164,9 @@ export default function PackingPage() {
   const filteredPendingGroups = pendingGroups.filter((group) => !selectedProductionOrder || group.production_order === selectedProductionOrder);
   const activeCapacity = activeMaster[0]?.master_box_capacity ?? 0;
   const activeUnits = activeMaster.reduce((sum, box) => sum + box.actual_qty, 0);
-  const selectedUnassignedBoxes = availableBoxes.filter((box) => {
+  const selectedPendingBoxes = availableBoxes.filter((box) => {
     if (activeMaster.some((selected) => selected.id === box.id)) return false;
     return !selectedProductionOrder || box.production_order_number === selectedProductionOrder;
-  });
-  const visibleAvailableBoxes = availableBoxes.filter((box) => {
-    if (activeMaster.some((selected) => selected.id === box.id)) return false;
-    if (selectedProductionOrder && box.production_order_number !== selectedProductionOrder) return false;
-    const query = availableSearch.trim().toLowerCase();
-    return !query || box.box_code.toLowerCase().includes(query) || box.product_code.toLowerCase().includes(query) || box.production_order_number.toLowerCase().includes(query);
   });
 
   const workStep = useMemo(() => {
@@ -281,44 +274,11 @@ export default function PackingPage() {
 
   function closeSmallBoxLabel(box: SmallBox) {
     setSmallBoxLabel(null);
-    setMessage(`${box.box_code} stays in Unassigned Small Boxes until it is added to a Master Box.`);
+    setMessage(`${box.box_code} stays in Pack Next Small Box as Label Printed until it is attached.`);
   }
 
   return (
     <ModulePage eyebrow="Logistics & Packing" title="Packing Workbench" description="Pack parts into Small Boxes, build the active Master Box, then release Finished Goods for delivery.">
-      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-5">
-        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-          <div>
-            <p className="text-xs font-black uppercase tracking-wider text-blue-700">Production Order Focus</p>
-            <h2 className="mt-1 text-xl font-black">Choose one PO to pack</h2>
-          </div>
-          {selectedSummary && <p className="text-sm font-bold text-slate-500">{selectedSummary.ready} ready / {selectedSummary.unassigned} unassigned / {selectedSummary.waiting} waiting</p>}
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {poSummaries.map((item) => {
-            const lockedByActiveMaster = !!activeMaster.length && activeMaster[0]?.production_order_number !== item.productionOrder;
-            const selected = selectedProductionOrder === item.productionOrder;
-            return (
-              <button
-                className={`rounded-xl border p-4 text-left transition ${selected ? "border-blue-500 bg-blue-50 shadow-sm" : lockedByActiveMaster ? "border-slate-200 bg-slate-50 opacity-60" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
-                disabled={lockedByActiveMaster}
-                key={item.productionOrder}
-                onClick={() => setSelectedProductionOrder(item.productionOrder)}
-                type="button"
-              >
-                <p className="truncate font-mono text-sm font-black text-blue-950">{item.productionOrder}</p>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="rounded-lg bg-emerald-50 px-2 py-2 font-black text-emerald-700"><p className="text-base">{item.ready}</p><p>Ready</p></div>
-                  <div className="rounded-lg bg-blue-50 px-2 py-2 font-black text-blue-700"><p className="text-base">{item.unassigned}</p><p>Unassigned</p></div>
-                  <div className="rounded-lg bg-amber-50 px-2 py-2 font-black text-amber-700"><p className="text-base">{item.waiting}</p><p>Waiting</p></div>
-                </div>
-              </button>
-            );
-          })}
-          {!poSummaries.length && <div className="rounded-xl border border-dashed p-5 text-sm text-slate-500">No Production Orders are waiting in Packing.</div>}
-        </div>
-      </section>
-
       <section className="mb-5 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
         <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
           <p className="text-xs font-black uppercase tracking-wider text-blue-700">Current Step</p>
@@ -350,12 +310,58 @@ export default function PackingPage() {
             <header className="flex flex-col justify-between gap-3 border-b p-5 sm:flex-row sm:items-center">
               <div>
                 <h2 className="text-xl font-black">Pack Next Small Box</h2>
-                <p className="text-sm text-slate-500">{selectedProductionOrder ? `Ready groups for ${selectedProductionOrder}.` : "Pick a Production Order to show ready groups."}</p>
+                <p className="text-sm text-slate-500">{selectedProductionOrder ? `${selectedProductionOrder}: ${selectedSummary?.ready ?? 0} ready, ${selectedSummary?.unassigned ?? 0} label printed, ${selectedSummary?.waiting ?? 0} waiting.` : "Pick a Production Order to show ready groups."}</p>
               </div>
               <button className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-black text-slate-700 hover:bg-slate-50" disabled={loading} onClick={() => void refresh()}>Refresh</button>
             </header>
             <div className="space-y-3 p-5">
+              <div className="grid gap-3 md:grid-cols-2">
+                {poSummaries.map((item) => {
+                  const lockedByActiveMaster = !!activeMaster.length && activeMaster[0]?.production_order_number !== item.productionOrder;
+                  const selected = selectedProductionOrder === item.productionOrder;
+                  return (
+                    <button
+                      className={`rounded-xl border p-4 text-left transition ${selected ? "border-blue-500 bg-blue-50 shadow-sm" : lockedByActiveMaster ? "border-slate-200 bg-slate-50 opacity-60" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
+                      disabled={lockedByActiveMaster}
+                      key={item.productionOrder}
+                      onClick={() => setSelectedProductionOrder(item.productionOrder)}
+                      type="button"
+                    >
+                      <p className="truncate font-mono text-sm font-black text-blue-950">{item.productionOrder}</p>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                        <div className="rounded-lg bg-emerald-50 px-2 py-2 font-black text-emerald-700"><p className="text-base">{item.ready}</p><p>Ready</p></div>
+                        <div className="rounded-lg bg-blue-50 px-2 py-2 font-black text-blue-700"><p className="text-base">{item.unassigned}</p><p>Printed</p></div>
+                        <div className="rounded-lg bg-amber-50 px-2 py-2 font-black text-amber-700"><p className="text-base">{item.waiting}</p><p>Waiting</p></div>
+                      </div>
+                    </button>
+                  );
+                })}
+                {!poSummaries.length && <div className="rounded-xl border border-dashed p-5 text-sm text-slate-500">No Production Orders are waiting in Packing.</div>}
+              </div>
+
               {loading && Array.from({ length: 3 }).map((_, index) => <div className="h-24 animate-pulse rounded-2xl bg-slate-100" key={index} />)}
+              {!loading && selectedPendingBoxes.map((box, index) => {
+                const compatible = !activeMaster[0] || (box.production_order_id === activeMaster[0].production_order_id && box.packaging_config_id === activeMaster[0].packaging_config_id);
+                return (
+                  <article className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4 transition hover:border-blue-400" key={box.id}>
+                    <div className="grid gap-4 lg:grid-cols-[48px_1fr_260px] lg:items-center">
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-lg font-black text-blue-700">{index + 1}</span>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-mono font-black">{box.box_code}</h3>
+                          <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-700">Label Printed</span>
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{box.actual_qty} PCS</span>
+                        </div>
+                        <p className="mt-2 font-mono text-sm font-bold text-blue-950 sm:text-base">{box.serial_from} to {box.serial_to}</p>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <button className="rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-black text-blue-700 hover:bg-blue-50" onClick={() => setSmallBoxLabel(box)}>Reprint</button>
+                        <button className="rounded-xl bg-blue-700 px-4 py-3 text-sm font-black text-white hover:bg-blue-800 disabled:bg-slate-300" disabled={busy || !compatible || !!smallBoxLabel || !!masterBoxLabel} onClick={() => void addSmallBoxToMaster(box)}>Label Attached</button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
               {!loading && filteredReadyGroups.map((group, index) => (
                 <article className="rounded-2xl border border-emerald-200 bg-white p-4 transition hover:border-emerald-400" key={group.serial_group_id}>
                   <div className="grid gap-4 lg:grid-cols-[48px_1fr_190px] lg:items-center">
@@ -372,7 +378,7 @@ export default function PackingPage() {
                   </div>
                 </article>
               ))}
-              {!loading && !filteredReadyGroups.length && <EmptyState title="No groups ready" text={selectedProductionOrder ? "This Production Order has no ready groups right now." : "Ready serial groups will appear here after QC and laser marking are complete."} />}
+              {!loading && !filteredReadyGroups.length && !selectedPendingBoxes.length && <EmptyState title="No groups ready" text={selectedProductionOrder ? "This Production Order has no ready groups or printed labels right now." : "Ready serial groups will appear here after QC and laser marking are complete."} />}
             </div>
           </section>
 
@@ -406,33 +412,6 @@ export default function PackingPage() {
         </section>
 
         <aside className="space-y-5">
-          <section className="card">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-black uppercase tracking-wider text-blue-700">Unassigned Small Boxes</p>
-                <h2 className="mt-1 text-xl font-black">{selectedUnassignedBoxes.length} waiting for Master</h2>
-              </div>
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{selectedProductionOrder ?? "All PO"}</span>
-            </div>
-            <input className="field mt-4 text-sm" placeholder="Search Small Box / product / PO" value={availableSearch} onChange={(event) => setAvailableSearch(event.target.value)} />
-            <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
-              {visibleAvailableBoxes.map((box) => {
-                const compatible = !activeMaster[0] || (box.production_order_id === activeMaster[0].production_order_id && box.packaging_config_id === activeMaster[0].packaging_config_id);
-                return (
-                  <article className={`rounded-xl border p-3 ${compatible ? "bg-white" : "bg-slate-50 opacity-60"}`} key={box.id}>
-                    <p className="font-mono text-sm font-black">{box.box_code}</p>
-                    <p className="mt-1 text-xs text-slate-500">{box.product_code} / {box.production_order_number} / {box.actual_qty} FG</p>
-                    <div className="mt-3 flex gap-2">
-                      <button className="rounded-lg border px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50" onClick={() => setSmallBoxLabel(box)}>Reprint</button>
-                      <button className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-black text-white disabled:bg-slate-300" disabled={busy || !compatible} onClick={() => void addSmallBoxToMaster(box)}>Add to Master</button>
-                    </div>
-                  </article>
-                );
-              })}
-              {!visibleAvailableBoxes.length && <p className="rounded-xl border border-dashed p-5 text-center text-sm text-slate-500">No unassigned Small Boxes for this PO.</p>}
-            </div>
-          </section>
-
           <section className="card">
             <div className="flex items-center justify-between gap-3">
               <div>

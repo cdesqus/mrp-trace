@@ -59,7 +59,12 @@ export default function ProductionTraysPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-  useHardwareScanner((code) => { if (assignOpen) setForm((current) => ({ ...current, tray_code: code })); }, assignOpen);
+  useHardwareScanner((code) => {
+    if (!assignOpen) return;
+    const nextForm = { ...form, tray_code: code.trim().toUpperCase() };
+    setForm(nextForm);
+    if (nextForm.production_order_id && Number(nextForm.quantity) > 0) void assignTrayCycle(nextForm);
+  }, assignOpen && !submitting);
 
   const metrics = useMemo(() => ({
     activeOrders: orders.filter((item) => item.status === "IN_PROGRESS").length,
@@ -70,7 +75,11 @@ export default function ProductionTraysPage() {
 
   async function assign(event: FormEvent) {
     event.preventDefault();
-    if (!form.production_order_id || !form.tray_code || Number(form.quantity) <= 0) {
+    await assignTrayCycle(form);
+  }
+
+  async function assignTrayCycle(nextForm = form) {
+    if (!nextForm.production_order_id || !nextForm.tray_code || Number(nextForm.quantity) <= 0) {
       setMessage("Select a Production Order, scan a tray, and enter a valid quantity.");
       return;
     }
@@ -79,9 +88,9 @@ export default function ProductionTraysPage() {
       await api("/api/trays/assign", {
         method: "POST",
         body: JSON.stringify({
-          production_order_id: Number(form.production_order_id),
-          tray_code: form.tray_code.trim(),
-          quantity: Number(form.quantity),
+          production_order_id: Number(nextForm.production_order_id),
+          tray_code: nextForm.tray_code.trim(),
+          quantity: Number(nextForm.quantity),
         }),
       });
       setAssignOpen(false); setForm({ production_order_id: "", tray_code: "", quantity: "" }); setMessage(""); await load();
@@ -149,7 +158,7 @@ export default function ProductionTraysPage() {
             <div className="space-y-4 p-6">
               {message && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{message}</div>}
               <label className="block text-sm font-bold text-slate-700">Production Order<select className="field mt-2 text-base" value={form.production_order_id} onChange={(event) => setForm({ ...form, production_order_id: event.target.value })}><option value="">Select Production Order</option>{orders.filter((item) => item.status !== "COMPLETED" && item.assigned_qty < item.planned_qty).map((item) => <option value={item.id} key={item.id}>{item.production_order_number} — {item.product_code} ({item.planned_qty - item.assigned_qty} remaining)</option>)}</select></label>
-              <label className="block text-sm font-bold text-slate-700">Tray QR / ID<input autoFocus className="field mt-2 font-mono text-base" placeholder="Scan TRAY-001" value={form.tray_code} onChange={(event) => setForm({ ...form, tray_code: event.target.value })} /><span className="mt-1 block text-xs font-normal text-slate-400">Hardware scanner input is active while this dialog is open.</span></label>
+              <label className="block text-sm font-bold text-slate-700">Tray QR / ID<input autoFocus className="field mt-2 font-mono text-base uppercase" placeholder="Scan TRAY-001" value={form.tray_code} onChange={(event) => setForm({ ...form, tray_code: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") void assignTrayCycle({ ...form, tray_code: event.currentTarget.value.trim().toUpperCase() }); }} /><span className="mt-1 block text-xs font-normal text-slate-400">One scan starts the tray cycle when Production Order and quantity are filled.</span></label>
               <label className="block text-sm font-bold text-slate-700">Cycle Quantity<input className="field mt-2 text-base" min="1" placeholder="Number of FG in this tray" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></label>
             </div>
             <footer className="flex justify-end gap-3 border-t px-6 py-4"><button className="rounded-xl border border-slate-300 px-5 py-3 font-bold" onClick={() => setAssignOpen(false)} type="button">Cancel</button><button className="primary" disabled={submitting} type="submit">{submitting ? "Assigning…" : "Start Tray Cycle"}</button></footer>
