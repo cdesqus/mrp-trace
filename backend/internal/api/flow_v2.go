@@ -1082,11 +1082,25 @@ func (s *Server) createPreQCFlowLaserBatch(c *gin.Context) {
 	defer tx.Rollback(c)
 	_, _ = tx.Exec(c, `SELECT pg_advisory_xact_lock(26062901)`)
 	var productionID, trayCycleID, configID, carrierTrayID int64
-	var capacity, plannedQty int
+	var capacity, plannedQty, targetQty int
 	err = tx.QueryRow(c, `SELECT qs.production_order_id,qs.tray_cycle_id,sol.packaging_config_id,pc.parts_per_small_box,po.planned_qty FROM t_qc_sessions qs JOIN t_production_orders po ON po.id=qs.production_order_id JOIN t_sales_order_lines sol ON sol.id=po.sales_order_line_id JOIN m_packaging_configs pc ON pc.id=sol.packaging_config_id WHERE qs.id=$1`, req.QCSessionID).Scan(&productionID, &trayCycleID, &configID, &capacity, &plannedQty)
 	if err != nil {
 		fail(c, 409, fmt.Errorf("QC session is unavailable"))
 		return
+	}
+	targetQty = plannedQty
+	var actualQCQty int
+	if err = tx.QueryRow(c, `
+		SELECT COUNT(*)
+		FROM t_pre_laser_units pu
+		JOIN t_qc_sessions qs ON qs.id=pu.qc_session_id
+		WHERE qs.production_order_id=$1
+	`, productionID).Scan(&actualQCQty); err != nil {
+		fail(c, 500, err)
+		return
+	}
+	if actualQCQty > targetQty {
+		targetQty = actualQCQty
 	}
 	var carrierTrayType string
 	if err = tx.QueryRow(c, `SELECT id,tray_type FROM m_trays WHERE tray_code=$1 AND is_active`, strings.ToUpper(strings.TrimSpace(req.CarrierTrayCode))).Scan(&carrierTrayID, &carrierTrayType); err != nil {
@@ -1136,7 +1150,7 @@ func (s *Server) createPreQCFlowLaserBatch(c *gin.Context) {
 		var groupID int64
 		err = tx.QueryRow(c, `SELECT sg.id FROM t_serial_groups sg WHERE sg.production_order_id=$1 AND sg.status='QC_PROCESS' AND (SELECT COUNT(*) FROM t_units_tracking u WHERE u.serial_group_id=sg.id)<sg.group_size ORDER BY sg.id LIMIT 1`, productionID).Scan(&groupID)
 		if err != nil {
-			remainingQty := plannedQty - existingUnits
+			remainingQty := targetQty - existingUnits
 			if remainingQty <= 0 {
 				fail(c, 409, fmt.Errorf("production order quantity is already fully serialized"))
 				return

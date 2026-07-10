@@ -17,6 +17,8 @@ type Delivery = {
   customer_name: string;
   master_box_qty: number;
   unit_qty: number;
+  order_qty: number;
+  outstanding_qty: number;
   created_by?: string;
   created_at?: string;
 };
@@ -166,6 +168,7 @@ export default function DeliveryOrdersPage() {
       ready: items.filter((item) => item.status === "READY").length,
       shipped: items.filter((item) => item.status === "SHIPPED").length,
       units: items.reduce((sum, item) => sum + item.unit_qty, 0),
+      outstanding: items.reduce((sum, item) => sum + item.outstanding_qty, 0),
     }),
     [items],
   );
@@ -173,8 +176,8 @@ export default function DeliveryOrdersPage() {
 
   return (
     <ModulePage eyebrow="Logistics & Packing" title="Delivery Orders" description="" actions={<button className="primary" onClick={() => setCreateOpen(true)}>New Delivery Order</button>}>
-      <div className="grid gap-4 md:grid-cols-4">
-        {[["Open DO", summary.open], ["Ready DO", summary.ready], ["Shipped DO", summary.shipped], ["Assigned FG", summary.units.toLocaleString()]].map(([label, value]) => (
+      <div className="grid gap-4 md:grid-cols-5">
+        {[["Open DO", summary.open], ["Ready DO", summary.ready], ["Shipped DO", summary.shipped], ["Assigned FG", summary.units.toLocaleString()], ["Outstanding", summary.outstanding.toLocaleString()]].map(([label, value]) => (
           <div className="card" key={label}>
             <p className="text-sm font-semibold text-slate-500">{label}</p>
             <p className="mt-3 text-3xl font-black text-blue-950">{value}</p>
@@ -183,15 +186,15 @@ export default function DeliveryOrdersPage() {
       </div>
       {message && <div className={`mt-5 rounded-xl border p-4 text-sm font-medium ${/cannot|failed|error|assign at least|unavailable/i.test(message) ? "border-red-200 bg-red-50 text-red-700" : "border-blue-200 bg-blue-50 text-blue-800"}`}>{message}</div>}
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_420px]">
+      <div className="mt-5 space-y-5">
         <section className="card overflow-hidden p-0">
           <div className="border-b px-5 py-4">
             <h2 className="font-black">Delivery Schedule</h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[960px] text-left">
+            <table className="w-full min-w-[1120px] text-left">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                <tr>{["Delivery Order", "Customer", "Sales Order", "Date", "Master Boxes", "FG Qty", "Status", "Actions"].map((label) => <th className="px-5 py-3.5" key={label}>{label}</th>)}</tr>
+                <tr>{["Delivery Order", "Customer", "Sales Order", "Date", "Order Qty", "Assigned FG", "Outstanding", "Master Boxes", "Status", "Actions"].map((label) => <th className="px-5 py-3.5" key={label}>{label}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {!loading && items.map((item) => (
@@ -200,14 +203,16 @@ export default function DeliveryOrdersPage() {
                     <td className="px-5 py-4"><p className="font-semibold">{item.customer_name}</p><p className="text-xs text-slate-400">{item.customer_code}</p></td>
                     <td className="px-5 py-4">{item.so_number}</td>
                     <td className="px-5 py-4 text-sm">{item.delivery_date}</td>
+                    <td className="px-5 py-4 font-bold">{item.order_qty.toLocaleString()}</td>
+                    <td className="px-5 py-4 font-bold text-blue-900">{item.unit_qty.toLocaleString()}</td>
+                    <td className={`px-5 py-4 font-black ${item.outstanding_qty ? "text-amber-700" : "text-emerald-700"}`}>{item.outstanding_qty.toLocaleString()}</td>
                     <td className="px-5 py-4 font-bold">{item.master_box_qty}</td>
-                    <td className="px-5 py-4">{item.unit_qty.toLocaleString()}</td>
                     <td className="px-5 py-4"><StatusPill status={item.status} /></td>
                     <td className="px-5 py-4">
                       <div className="flex gap-2">
                         <button className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-50" onClick={() => void selectDelivery(item)}>Open</button>
                         <button className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50" onClick={() => void openPDF(item)}>PDF</button>
-                        <RecordAuditButton audit={{ title: item.do_number, subtitle: item.customer_name, createdBy: item.created_by, createdAt: item.created_at, fields: [{ label: "Sales Order", value: item.so_number }, { label: "Delivery Date", value: item.delivery_date }, { label: "Master Boxes", value: item.master_box_qty }, { label: "FG Qty", value: item.unit_qty.toLocaleString() }] }} label="Info" />
+                        <RecordAuditButton audit={{ title: item.do_number, subtitle: item.customer_name, createdBy: item.created_by, createdAt: item.created_at, fields: [{ label: "Sales Order", value: item.so_number }, { label: "Delivery Date", value: item.delivery_date }, { label: "Order Qty", value: item.order_qty.toLocaleString() }, { label: "Assigned FG", value: item.unit_qty.toLocaleString() }, { label: "Outstanding", value: item.outstanding_qty.toLocaleString() }, { label: "Master Boxes", value: item.master_box_qty }] }} label="Info" />
                       </div>
                     </td>
                   </tr>
@@ -218,16 +223,18 @@ export default function DeliveryOrdersPage() {
           {!loading && !items.length && <div className="py-16 text-center text-slate-500">No Delivery Orders created.</div>}
         </section>
 
-        <aside className="space-y-4">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
           <section className="card">
             <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Delivery Workspace</p>
             <h3 className="mt-2 text-2xl font-black">{selected?.do_number ?? "Select a Delivery Order"}</h3>
             {selected ? (
               <>
                 <p className="mt-1 text-sm text-slate-500">{selected.customer_name} · {selected.so_number}</p>
-                <div className="mt-5 grid grid-cols-3 gap-3 text-center">
+                <div className="mt-5 grid gap-3 text-center sm:grid-cols-5">
+                  <div className="rounded-2xl bg-slate-50 p-3"><p className="text-xs font-bold text-slate-500">Order</p><p className="text-2xl font-black text-slate-950">{selected.order_qty}</p></div>
                   <div className="rounded-2xl bg-blue-50 p-3"><p className="text-xs font-bold text-blue-600">Assigned</p><p className="text-2xl font-black text-blue-950">{selected.master_box_qty}</p></div>
                   <div className="rounded-2xl bg-emerald-50 p-3"><p className="text-xs font-bold text-emerald-600">FG</p><p className="text-2xl font-black text-emerald-950">{selected.unit_qty}</p></div>
+                  <div className="rounded-2xl bg-amber-50 p-3"><p className="text-xs font-bold text-amber-700">Outstanding</p><p className="text-2xl font-black text-amber-950">{selected.outstanding_qty}</p></div>
                   <div className="rounded-2xl bg-slate-50 p-3"><p className="text-xs font-bold text-slate-500">Status</p><p className="text-sm font-black text-slate-900">{selected.status}</p></div>
                 </div>
                 <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -269,7 +276,7 @@ export default function DeliveryOrdersPage() {
               </div>
             </section>
           )}
-        </aside>
+        </div>
       </div>
 
       {createOpen && (

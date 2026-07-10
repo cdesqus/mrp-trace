@@ -315,23 +315,26 @@ export default function PackingPage() {
               <button className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-black text-slate-700 hover:bg-slate-50" disabled={loading} onClick={() => void refresh()}>Refresh</button>
             </header>
             <div className="space-y-3 p-5">
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
                 {poSummaries.map((item) => {
                   const lockedByActiveMaster = !!activeMaster.length && activeMaster[0]?.production_order_number !== item.productionOrder;
                   const selected = selectedProductionOrder === item.productionOrder;
                   return (
                     <button
-                      className={`rounded-xl border p-4 text-left transition ${selected ? "border-blue-500 bg-blue-50 shadow-sm" : lockedByActiveMaster ? "border-slate-200 bg-slate-50 opacity-60" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
+                      className={`grid w-full gap-3 rounded-xl border p-3 text-left transition sm:grid-cols-[1fr_auto] sm:items-center ${selected ? "border-blue-500 bg-blue-50 shadow-sm" : lockedByActiveMaster ? "border-slate-200 bg-slate-50 opacity-60" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
                       disabled={lockedByActiveMaster}
                       key={item.productionOrder}
                       onClick={() => setSelectedProductionOrder(item.productionOrder)}
                       type="button"
                     >
-                      <p className="truncate font-mono text-sm font-black text-blue-950">{item.productionOrder}</p>
-                      <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                        <div className="rounded-lg bg-emerald-50 px-2 py-2 font-black text-emerald-700"><p className="text-base">{item.ready}</p><p>Ready</p></div>
-                        <div className="rounded-lg bg-blue-50 px-2 py-2 font-black text-blue-700"><p className="text-base">{item.unassigned}</p><p>Printed</p></div>
-                        <div className="rounded-lg bg-amber-50 px-2 py-2 font-black text-amber-700"><p className="text-base">{item.waiting}</p><p>Waiting</p></div>
+                      <div className="min-w-0">
+                        <p className="truncate font-mono text-sm font-black text-blue-950">{item.productionOrder}</p>
+                        <p className="mt-1 text-xs font-semibold text-slate-500">{item.ready} ready, {item.unassigned} label printed, {item.waiting} waiting</p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs sm:w-72">
+                        <div className="rounded-lg bg-emerald-50 px-2 py-2 font-black text-emerald-700"><span className="text-base">{item.ready}</span><span className="ml-1">Ready</span></div>
+                        <div className="rounded-lg bg-blue-50 px-2 py-2 font-black text-blue-700"><span className="text-base">{item.unassigned}</span><span className="ml-1">Printed</span></div>
+                        <div className="rounded-lg bg-amber-50 px-2 py-2 font-black text-amber-700"><span className="text-base">{item.waiting}</span><span className="ml-1">Wait</span></div>
                       </div>
                     </button>
                   );

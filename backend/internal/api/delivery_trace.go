@@ -21,13 +21,20 @@ func (s *Server) listDeliveryOrders(c *gin.Context) {
 	rows, err := s.db.Query(c, `
 		SELECT d.id,d.do_number,d.delivery_date,d.status,so.id,so.so_number,
 		       c.customer_code,c.customer_name,
-		       COUNT(mb.id),COALESCE(SUM(mb.actual_unit_qty),0),d.created_by,d.created_at
+		       COUNT(mb.id),COALESCE(SUM(mb.actual_unit_qty),0),
+		       COALESCE(order_qty.quantity,0),GREATEST(COALESCE(order_qty.quantity,0)-COALESCE(SUM(mb.actual_unit_qty),0),0),
+		       d.created_by,d.created_at
 		FROM t_delivery_orders d
 		JOIN t_sales_orders so ON so.id=d.sales_order_id
 		JOIN m_customers c ON c.id=so.customer_id
+		LEFT JOIN (
+			SELECT sales_order_id,SUM(quantity) quantity
+			FROM t_sales_order_lines
+			GROUP BY sales_order_id
+		) order_qty ON order_qty.sales_order_id=so.id
 		LEFT JOIN t_delivery_order_master_boxes domb ON domb.delivery_order_id=d.id
 		LEFT JOIN t_master_boxes mb ON mb.id=domb.master_box_id
-		GROUP BY d.id,so.id,c.id
+		GROUP BY d.id,so.id,c.id,order_qty.quantity
 		ORDER BY d.created_at DESC LIMIT 100
 	`)
 	if err != nil {
@@ -40,9 +47,9 @@ func (s *Server) listDeliveryOrders(c *gin.Context) {
 		var id, salesOrderID int64
 		var number, status, soNumber, customerCode, customerName, createdBy string
 		var deliveryDate, created time.Time
-		var masterQty, unitQty int
+		var masterQty, unitQty, orderQty, outstandingQty int
 		if err = rows.Scan(&id, &number, &deliveryDate, &status, &salesOrderID, &soNumber,
-			&customerCode, &customerName, &masterQty, &unitQty, &createdBy, &created); err != nil {
+			&customerCode, &customerName, &masterQty, &unitQty, &orderQty, &outstandingQty, &createdBy, &created); err != nil {
 			fail(c, 500, err)
 			return
 		}
@@ -50,7 +57,8 @@ func (s *Server) listDeliveryOrders(c *gin.Context) {
 			"id": id, "do_number": number, "delivery_date": deliveryDate.Format("2006-01-02"),
 			"status": status, "sales_order_id": salesOrderID, "so_number": soNumber,
 			"customer_code": customerCode, "customer_name": customerName,
-			"master_box_qty": masterQty, "unit_qty": unitQty, "created_by": createdBy, "created_at": created,
+			"master_box_qty": masterQty, "unit_qty": unitQty, "order_qty": orderQty,
+			"outstanding_qty": outstandingQty, "created_by": createdBy, "created_at": created,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
@@ -85,6 +93,15 @@ func (s *Server) createDeliveryOrder(c *gin.Context) {
 
 type assignMasterRequest struct {
 	MasterBoxCode string `json:"master_box_code" binding:"required"`
+}
+
+type deliveryManifestRow struct {
+	Code       string
+	Product    string
+	PO         string
+	SmallBoxes int
+	Units      int
+	PackedAt   time.Time
 }
 
 func (s *Server) assignMasterBox(c *gin.Context) {
@@ -242,13 +259,15 @@ func (s *Server) deliveryOrderPDF(c *gin.Context) {
 	}
 	var doNumber, status, soNumber, customerCode, customerName string
 	var deliveryDate time.Time
+	var orderQty int
 	err = s.db.QueryRow(c, `
-		SELECT d.do_number,d.delivery_date,d.status,so.so_number,c.customer_code,c.customer_name
+		SELECT d.do_number,d.delivery_date,d.status,so.so_number,c.customer_code,c.customer_name,
+		       COALESCE((SELECT SUM(quantity) FROM t_sales_order_lines WHERE sales_order_id=so.id),0)
 		FROM t_delivery_orders d
 		JOIN t_sales_orders so ON so.id=d.sales_order_id
 		JOIN m_customers c ON c.id=so.customer_id
 		WHERE d.id=$1
-	`, doID).Scan(&doNumber, &deliveryDate, &status, &soNumber, &customerCode, &customerName)
+	`, doID).Scan(&doNumber, &deliveryDate, &status, &soNumber, &customerCode, &customerName, &orderQty)
 	if err != nil {
 		fail(c, 404, fmt.Errorf("delivery order not found"))
 		return
@@ -269,20 +288,8 @@ func (s *Server) deliveryOrderPDF(c *gin.Context) {
 		return
 	}
 	defer rows.Close()
-	lines := []string{
-		"DELIVERY OUT MANIFEST",
-		"DO Number      : " + doNumber,
-		"Sales Order    : " + soNumber,
-		"Customer       : " + customerCode + " - " + customerName,
-		"Delivery Date  : " + deliveryDate.Format("02 Jan 2006"),
-		"Status         : " + status,
-		"Generated At   : " + time.Now().Format("02 Jan 2006 15:04"),
-		"",
-		"Master Box List",
-		"No | Master Box | Product | PO | Small Boxes | FG Qty | Packed At",
-	}
+	manifestRows := make([]deliveryManifestRow, 0)
 	totalBoxes, totalUnits := 0, 0
-	index := 1
 	for rows.Next() {
 		var code, po, product string
 		var smallBoxes, units int
@@ -293,13 +300,113 @@ func (s *Server) deliveryOrderPDF(c *gin.Context) {
 		}
 		totalBoxes += smallBoxes
 		totalUnits += units
-		lines = append(lines, fmt.Sprintf("%02d | %s | %s | %s | %d | %d | %s", index, code, product, po, smallBoxes, units, packedAt.Format("02 Jan 15:04")))
-		index++
+		manifestRows = append(manifestRows, deliveryManifestRow{Code: code, Product: product, PO: po, SmallBoxes: smallBoxes, Units: units, PackedAt: packedAt})
 	}
-	lines = append(lines, "", fmt.Sprintf("TOTAL MASTER BOX : %d", index-1), fmt.Sprintf("TOTAL SMALL BOX  : %d", totalBoxes), fmt.Sprintf("TOTAL FG QTY     : %d", totalUnits), "", "Prepared By: ____________________", "Received By: ____________________")
-	pdf := simpleTextPDF(lines)
+	outstanding := orderQty - totalUnits
+	if outstanding < 0 {
+		outstanding = 0
+	}
+	pdf := deliveryManifestPDF(gin.H{
+		"do_number": doNumber, "sales_order": soNumber, "customer": customerCode + " - " + customerName,
+		"delivery_date": deliveryDate.Format("02 Jan 2006"), "status": status,
+		"generated_at": time.Now().Format("02 Jan 2006 15:04"),
+		"order_qty": orderQty, "total_master": len(manifestRows), "total_small": totalBoxes,
+		"total_fg": totalUnits, "outstanding": outstanding,
+	}, manifestRows)
 	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s.pdf"`, doNumber))
 	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+func deliveryManifestPDF(header gin.H, rows []deliveryManifestRow) []byte {
+	type pdfRow struct {
+		Code       string
+		Product    string
+		PO         string
+		SmallBoxes int
+		Units      int
+		PackedAt   time.Time
+	}
+	items := make([]pdfRow, len(rows))
+	for i, row := range rows {
+		items[i] = pdfRow(row)
+	}
+	var buf bytes.Buffer
+	offsets := []int{0}
+	buf.WriteString("%PDF-1.4\n")
+	writeObj := func(id int, body string) {
+		offsets = append(offsets, buf.Len())
+		fmt.Fprintf(&buf, "%d 0 obj\n%s\nendobj\n", id, body)
+	}
+	writeObj(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	writeObj(2, "<< /Type /Pages /Kids [4 0 R] /Count 1 >>")
+	writeObj(3, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	writeObj(4, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>")
+	var content bytes.Buffer
+	text := func(size int, x, y int, value string) {
+		fmt.Fprintf(&content, "BT /F1 %d Tf %d %d Td (%s) Tj ET\n", size, x, y, escapePDFText(value))
+	}
+	line := func(x1, y1, x2, y2 int) {
+		fmt.Fprintf(&content, "%d %d m %d %d l S\n", x1, y1, x2, y2)
+	}
+	rect := func(x, y, w, h int) {
+		fmt.Fprintf(&content, "%d %d %d %d re S\n", x, y, w, h)
+	}
+	text(18, 36, 550, "DELIVERY OUT MANIFEST")
+	text(9, 36, 530, "DO Number: "+fmt.Sprint(header["do_number"]))
+	text(9, 36, 515, "Sales Order: "+fmt.Sprint(header["sales_order"]))
+	text(9, 36, 500, "Customer: "+fmt.Sprint(header["customer"]))
+	text(9, 350, 530, "Delivery Date: "+fmt.Sprint(header["delivery_date"]))
+	text(9, 350, 515, "Status: "+fmt.Sprint(header["status"]))
+	text(9, 350, 500, "Generated At: "+fmt.Sprint(header["generated_at"]))
+	summary := []struct{ label, value string }{
+		{"Order Qty", fmt.Sprint(header["order_qty"])},
+		{"Delivered FG", fmt.Sprint(header["total_fg"])},
+		{"Outstanding", fmt.Sprint(header["outstanding"])},
+		{"Master Boxes", fmt.Sprint(header["total_master"])},
+		{"Small Boxes", fmt.Sprint(header["total_small"])},
+	}
+	for i, item := range summary {
+		x := 36 + i*150
+		rect(x, 455, 136, 42)
+		text(8, x+8, 480, item.label)
+		text(16, x+8, 462, item.value)
+	}
+	tableX, tableY := 36, 420
+	widths := []int{32, 178, 95, 150, 82, 70, 95}
+	headers := []string{"No", "Master Box", "Product", "Production Order", "Small Boxes", "FG Qty", "Packed At"}
+	x := tableX
+	for i, h := range headers {
+		rect(x, tableY-20, widths[i], 20)
+		text(8, x+5, tableY-14, h)
+		x += widths[i]
+	}
+	y := tableY - 40
+	for i, row := range items {
+		if y < 90 {
+			break
+		}
+		values := []string{fmt.Sprintf("%02d", i+1), row.Code, row.Product, row.PO, fmt.Sprint(row.SmallBoxes), fmt.Sprint(row.Units), row.PackedAt.Format("02 Jan 15:04")}
+		x = tableX
+		for col, value := range values {
+			rect(x, y, widths[col], 20)
+			text(8, x+5, y+6, value)
+			x += widths[col]
+		}
+		y -= 20
+	}
+	line(36, 64, 260, 64)
+	line(320, 64, 544, 64)
+	text(9, 36, 48, "Prepared By")
+	text(9, 320, 48, "Received By")
+	body := fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", content.Len(), content.String())
+	writeObj(5, body)
+	xrefAt := buf.Len()
+	fmt.Fprintf(&buf, "xref\n0 %d\n0000000000 65535 f \n", len(offsets))
+	for _, offset := range offsets[1:] {
+		fmt.Fprintf(&buf, "%010d 00000 n \n", offset)
+	}
+	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%s\n%%%%EOF", len(offsets), strconv.Itoa(xrefAt))
+	return buf.Bytes()
 }
 
 func simpleTextPDF(lines []string) []byte {
