@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -310,7 +311,7 @@ func (s *Server) deliveryOrderPDF(c *gin.Context) {
 		"do_number": doNumber, "sales_order": soNumber, "customer": customerCode + " - " + customerName,
 		"delivery_date": deliveryDate.Format("02 Jan 2006"), "status": status,
 		"generated_at": time.Now().Format("02 Jan 2006 15:04"),
-		"order_qty": orderQty, "total_master": len(manifestRows), "total_small": totalBoxes,
+		"order_qty":    orderQty, "total_master": len(manifestRows), "total_small": totalBoxes,
 		"total_fg": totalUnits, "outstanding": outstanding,
 	}, manifestRows)
 	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s.pdf"`, doNumber))
@@ -517,8 +518,12 @@ func (s *Server) traceSerial(c *gin.Context) {
 	}
 	var qcSession, originalTray, laserCarrier string
 	var laserBatch *string
-	_ = s.db.QueryRow(c, `
-		SELECT qs.session_code,origin.tray_code,COALESCE(carrier.tray_code,origin.tray_code),lb.batch_code
+	var v2ReworkCode sql.NullString
+	v2Rows, err := s.db.Query(c, `
+		SELECT pu.id,COALESCE(pu.initial_result,''),pu.ng_reason,pu.rework_code,pu.inspected_at,pu.rework_passed_at,
+		       COALESCE(pu.initial_qc_operator_id,qs.operator_id,''),COALESCE(pu.initial_qc_station_id,qs.started_station_id,''),
+		       COALESCE(pu.rework_qc_operator_id,''),COALESCE(pu.rework_qc_station_id,''),
+		       qs.session_code,origin.tray_code,COALESCE(carrier.tray_code,origin.tray_code),lb.batch_code
 		FROM t_units_tracking u
 		JOIN t_pre_laser_units pu ON pu.commercial_unit_id=u.id
 		JOIN t_qc_sessions qs ON qs.id=pu.qc_session_id
@@ -527,7 +532,63 @@ func (s *Server) traceSerial(c *gin.Context) {
 		LEFT JOIN t_laser_batches lb ON lb.id=lbu.laser_batch_id
 		LEFT JOIN m_trays carrier ON carrier.id=lb.carrier_tray_id
 		WHERE u.serial_number=$1
-	`, c.Param("serial")).Scan(&qcSession, &originalTray, &laserCarrier, &laserBatch)
+		ORDER BY pu.id
+	`, c.Param("serial"))
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	defer v2Rows.Close()
+	qcHistory := make([]gin.H, 0)
+	previouslyNG := false
+	for v2Rows.Next() {
+		var id int64
+		var initialResult, initialOperator, initialStation, reworkOperator, reworkStation string
+		var ngReason, reworkCode, batchCode sql.NullString
+		var inspectedAt, reworkPassedAt sql.NullTime
+		if err = v2Rows.Scan(
+			&id, &initialResult, &ngReason, &reworkCode, &inspectedAt, &reworkPassedAt,
+			&initialOperator, &initialStation, &reworkOperator, &reworkStation,
+			&qcSession, &originalTray, &laserCarrier, &batchCode,
+		); err != nil {
+			fail(c, 500, err)
+			return
+		}
+		if batchCode.Valid {
+			laserBatch = &batchCode.String
+		}
+		if reworkCode.Valid {
+			v2ReworkCode = reworkCode
+		}
+		var reasonPtr, reworkPtr *string
+		if ngReason.Valid {
+			reasonPtr = &ngReason.String
+		}
+		if reworkCode.Valid {
+			reworkPtr = &reworkCode.String
+		}
+		if initialResult != "" && inspectedAt.Valid {
+			if initialResult == "REJECT" {
+				previouslyNG = true
+			}
+			qcHistory = append(qcHistory, gin.H{
+				"id": id*10 + 1, "inspection_type": "INITIAL", "result": initialResult,
+				"reason": reasonPtr, "rework_code": reworkPtr, "operator_id": initialOperator,
+				"station_id": initialStation, "inspected_at": inspectedAt.Time,
+			})
+		}
+		if initialResult == "REJECT" && reworkPassedAt.Valid {
+			previouslyNG = true
+			qcHistory = append(qcHistory, gin.H{
+				"id": id*10 + 2, "inspection_type": "REWORK", "result": "PASS",
+				"reason": nil, "rework_code": reworkPtr, "operator_id": reworkOperator,
+				"station_id": reworkStation, "inspected_at": reworkPassedAt.Time,
+			})
+		}
+	}
+	if v2ReworkCode.Valid {
+		result.ReworkCode = &v2ReworkCode.String
+	}
 	rows, err := s.db.Query(c, `
 		SELECT qe.id,
 		       CASE WHEN EXISTS (
@@ -552,8 +613,6 @@ func (s *Server) traceSerial(c *gin.Context) {
 		return
 	}
 	defer rows.Close()
-	qcHistory := make([]gin.H, 0)
-	previouslyNG := false
 	for rows.Next() {
 		var id int64
 		var inspectionType, eventResult, operator, station string

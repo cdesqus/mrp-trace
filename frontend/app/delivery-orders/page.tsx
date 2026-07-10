@@ -223,12 +223,21 @@ export default function DeliveryOrdersPage() {
           {!loading && !items.length && <div className="py-16 text-center text-slate-500">No Delivery Orders created.</div>}
         </section>
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+        {selected && (
+          <div className="fixed inset-0 z-[90] bg-slate-950/35 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
+            <aside className="absolute right-0 top-0 flex h-full w-full max-w-6xl flex-col bg-slate-50 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+              <header className="flex items-start justify-between gap-4 border-b bg-white px-5 py-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Delivery Workspace</p>
+                  <h3 className="mt-1 text-2xl font-black text-slate-950">{selected.do_number}</h3>
+                  <p className="mt-1 text-sm text-slate-500">{selected.customer_name} - {selected.so_number}</p>
+                </div>
+                <button className="h-10 w-10 rounded-xl border border-slate-200 bg-white font-black text-slate-700 hover:bg-slate-50" onClick={() => setSelected(null)} title="Close" type="button">X</button>
+              </header>
+              <div className="grid flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_360px]">
           <section className="card">
             <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Delivery Workspace</p>
-            <h3 className="mt-2 text-2xl font-black">{selected?.do_number ?? "Select a Delivery Order"}</h3>
-            {selected ? (
-              <>
+            <h3 className="mt-2 text-2xl font-black">{selected.do_number}</h3>
                 <p className="mt-1 text-sm text-slate-500">{selected.customer_name} · {selected.so_number}</p>
                 <div className="mt-5 grid gap-3 text-center sm:grid-cols-5">
                   <div className="rounded-2xl bg-slate-50 p-3"><p className="text-xs font-bold text-slate-500">Order</p><p className="text-2xl font-black text-slate-950">{selected.order_qty}</p></div>
@@ -252,13 +261,8 @@ export default function DeliveryOrdersPage() {
                   <button className="rounded-xl border border-blue-200 py-3 font-black text-blue-700 hover:bg-blue-50" onClick={() => void openPDF(selected)}>Open Delivery PDF</button>
                   <button className="rounded-xl bg-emerald-600 py-3 font-black text-white disabled:bg-slate-300" disabled={busy || !selected.master_box_qty || selected.status === "SHIPPED"} onClick={() => void ship()}>Confirm Delivery Out</button>
                 </div>
-              </>
-            ) : (
-              <p className="mt-3 text-sm leading-6 text-slate-500">Open a Delivery Order to assign ready Master Boxes and print its Delivery Out PDF.</p>
-            )}
           </section>
 
-          {selected && (
             <section className="card">
               <div className="flex items-center justify-between">
                 <h3 className="font-black">Suggested Master Boxes</h3>
@@ -275,8 +279,10 @@ export default function DeliveryOrdersPage() {
                 {!available.length && <p className="rounded-xl border border-dashed p-6 text-center text-sm text-slate-500">No unassigned Master Boxes for this Sales Order.</p>}
               </div>
             </section>
-          )}
-        </div>
+              </div>
+            </aside>
+          </div>
+        )}
       </div>
 
       {createOpen && (
