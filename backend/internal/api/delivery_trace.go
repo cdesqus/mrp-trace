@@ -521,6 +521,7 @@ func (s *Server) traceSerial(c *gin.Context) {
 	var v2ReworkCode sql.NullString
 	v2Rows, err := s.db.Query(c, `
 		SELECT pu.id,COALESCE(pu.initial_result,''),pu.ng_reason,pu.rework_code,pu.inspected_at,pu.rework_passed_at,
+		       ng.category_code,ng.category_name,
 		       COALESCE(pu.initial_qc_operator_id,qs.operator_id,''),COALESCE(pu.initial_qc_station_id,qs.started_station_id,''),
 		       COALESCE(pu.rework_qc_operator_id,''),COALESCE(pu.rework_qc_station_id,''),
 		       qs.session_code,origin.tray_code,COALESCE(carrier.tray_code,origin.tray_code),lb.batch_code
@@ -528,6 +529,7 @@ func (s *Server) traceSerial(c *gin.Context) {
 		JOIN t_pre_laser_units pu ON pu.commercial_unit_id=u.id
 		JOIN t_qc_sessions qs ON qs.id=pu.qc_session_id
 		JOIN m_trays origin ON origin.id=qs.tray_id
+		LEFT JOIN m_ng_categories ng ON ng.id=pu.ng_category_id
 		LEFT JOIN t_laser_batch_units lbu ON lbu.unit_id=u.id
 		LEFT JOIN t_laser_batches lb ON lb.id=lbu.laser_batch_id
 		LEFT JOIN m_trays carrier ON carrier.id=lb.carrier_tray_id
@@ -544,10 +546,11 @@ func (s *Server) traceSerial(c *gin.Context) {
 	for v2Rows.Next() {
 		var id int64
 		var initialResult, initialOperator, initialStation, reworkOperator, reworkStation string
-		var ngReason, reworkCode, batchCode sql.NullString
+		var ngReason, reworkCode, ngCategoryCode, ngCategoryName, batchCode sql.NullString
 		var inspectedAt, reworkPassedAt sql.NullTime
 		if err = v2Rows.Scan(
 			&id, &initialResult, &ngReason, &reworkCode, &inspectedAt, &reworkPassedAt,
+			&ngCategoryCode, &ngCategoryName,
 			&initialOperator, &initialStation, &reworkOperator, &reworkStation,
 			&qcSession, &originalTray, &laserCarrier, &batchCode,
 		); err != nil {
@@ -560,12 +563,18 @@ func (s *Server) traceSerial(c *gin.Context) {
 		if reworkCode.Valid {
 			v2ReworkCode = reworkCode
 		}
-		var reasonPtr, reworkPtr *string
+		var reasonPtr, reworkPtr, ngCategoryCodePtr, ngCategoryNamePtr *string
 		if ngReason.Valid {
 			reasonPtr = &ngReason.String
 		}
 		if reworkCode.Valid {
 			reworkPtr = &reworkCode.String
+		}
+		if ngCategoryCode.Valid {
+			ngCategoryCodePtr = &ngCategoryCode.String
+		}
+		if ngCategoryName.Valid {
+			ngCategoryNamePtr = &ngCategoryName.String
 		}
 		if initialResult != "" && inspectedAt.Valid {
 			if initialResult == "REJECT" {
@@ -575,6 +584,7 @@ func (s *Server) traceSerial(c *gin.Context) {
 				"id": id*10 + 1, "inspection_type": "INITIAL", "result": initialResult,
 				"reason": reasonPtr, "rework_code": reworkPtr, "operator_id": initialOperator,
 				"station_id": initialStation, "inspected_at": inspectedAt.Time,
+				"ng_category_code": ngCategoryCodePtr, "ng_category_name": ngCategoryNamePtr,
 			})
 		}
 		if initialResult == "REJECT" && reworkPassedAt.Valid {
@@ -583,6 +593,7 @@ func (s *Server) traceSerial(c *gin.Context) {
 				"id": id*10 + 2, "inspection_type": "REWORK", "result": "PASS",
 				"reason": nil, "rework_code": reworkPtr, "operator_id": reworkOperator,
 				"station_id": reworkStation, "inspected_at": reworkPassedAt.Time,
+				"ng_category_code": ngCategoryCodePtr, "ng_category_name": ngCategoryNamePtr,
 			})
 		}
 	}
@@ -632,6 +643,7 @@ func (s *Server) traceSerial(c *gin.Context) {
 			"id": id, "inspection_type": inspectionType, "result": eventResult,
 			"reason": reason, "rework_code": reworkCode, "operator_id": operator,
 			"station_id": station, "inspected_at": inspectedAt,
+			"ng_category_code": nil, "ng_category_name": reason,
 		})
 	}
 	if result.ReworkCode != nil {

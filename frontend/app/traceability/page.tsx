@@ -10,6 +10,8 @@ type QCTraceEvent = {
   inspection_type: "INITIAL" | "REWORK";
   result: "PASS" | "REJECT";
   reason: string | null;
+  ng_category_code: string | null;
+  ng_category_name: string | null;
   rework_code: string | null;
   operator_id: string;
   station_id: string;
@@ -147,7 +149,9 @@ export default function TraceabilityPage() {
                           <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
                             <div>
                               <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-black uppercase tracking-wider text-slate-500">Attempt {index + 1} · {event.inspection_type === "REWORK" ? "Rework QC" : "Initial QC"}</span><span className={`rounded-full px-2.5 py-1 text-xs font-black ${rejected ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{rejected ? "NG" : "OK"}</span></div>
-                              <p className="mt-2 font-black text-slate-900">{rejected ? event.reason ?? "NG reason not recorded" : event.inspection_type === "REWORK" ? "Rework verified and completed" : "Passed initial quality inspection"}</p>
+                              <p className="mt-2 font-black text-slate-900">{rejected ? event.reason ?? event.ng_category_name ?? "NG reason not recorded" : event.inspection_type === "REWORK" ? "Rework verified and completed" : "Passed initial quality inspection"}</p>
+                              {event.ng_category_name && <p className="mt-1 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-black text-amber-800">{event.ng_category_name}</p>}
+                              {event.ng_category_code && <p className="mt-1 text-xs font-bold uppercase tracking-wider text-amber-700">NG Category: {event.ng_category_code}</p>}
                               {event.rework_code && <p className="mt-1 font-mono text-sm font-bold text-amber-700">{event.rework_code}</p>}
                             </div>
                             <div className="text-sm sm:text-right"><p className="font-bold text-slate-700">{formatTime(event.inspected_at)}</p><p className="mt-1 text-xs text-slate-400">{event.operator_id} · {event.station_id}</p></div>

@@ -26,6 +26,7 @@ export default function NGCategoriesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<NGCategory | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
   async function load() {
@@ -49,6 +50,7 @@ export default function NGCategoriesPage() {
 
   function edit(item: NGCategory) {
     setEditing(item);
+    setCreateOpen(true);
     setForm({
       code: item.code,
       name: item.name,
@@ -62,6 +64,14 @@ export default function NGCategoriesPage() {
   function reset() {
     setEditing(null);
     setForm(emptyForm);
+    setCreateOpen(false);
+    setError("");
+  }
+
+  function newCategory() {
+    setEditing(null);
+    setForm(emptyForm);
+    setCreateOpen(true);
     setError("");
   }
 
@@ -105,11 +115,11 @@ export default function NGCategoriesPage() {
     }
   }
 
-  return <ModulePage eyebrow="Master Data" title="NG Categories" description="Maintain reject categories used by QC operators.">
-    <section className="card">
+  return <ModulePage eyebrow="Master Data" title="NG Categories" description="Maintain reject categories used by QC operators." actions={<button className="primary" onClick={newCategory}>+ New NG Category</button>}>
+    {(createOpen || editing) && <section className="card">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div><p className="text-xs font-black uppercase tracking-wider text-blue-700">{editing ? "Edit Category" : "Create Category"}</p><h2 className="mt-1 text-xl font-black">{editing ? editing.name : "New NG Category"}</h2></div>
-        {editing && <button className="rounded-xl border px-4 py-2 text-sm font-bold" onClick={reset} type="button">Cancel Edit</button>}
+        <button className="rounded-xl border px-4 py-2 text-sm font-bold" onClick={reset} type="button">{editing ? "Cancel Edit" : "Cancel"}</button>
       </div>
       <form className="grid gap-3 lg:grid-cols-[180px_1fr_1fr_120px_auto]" onSubmit={save}>
         <input className="field uppercase" placeholder="CODE optional" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })}/>
@@ -119,7 +129,7 @@ export default function NGCategoriesPage() {
         <button className="primary" disabled={busy || !form.name.trim()}>{busy ? "Saving..." : editing ? "Save Changes" : "Create"}</button>
       </form>
       {error && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
-    </section>
+    </section>}
 
     <section className="card mt-5 overflow-hidden p-0">
       <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center">

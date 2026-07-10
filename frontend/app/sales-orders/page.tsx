@@ -25,6 +25,10 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function compactCode(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 14) || "CUSTOMER";
+}
+
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     OPEN: "bg-sky-50 text-sky-700 ring-sky-600/20",
@@ -60,6 +64,7 @@ export default function SalesOrdersPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [customSONumber, setCustomSONumber] = useState(false);
   const [form, setForm] = useState({
     so_number: "", customer_id: "", order_date: today(), target_delivery_date: "",
     lines: [{ product_id: "", packaging_config_id: "", quantity: "" }] as OrderLine[],
@@ -103,8 +108,31 @@ export default function SalesOrdersPage() {
     ordered: orders.reduce((sum, item) => sum + item.order_qty, 0),
   }), [orders]);
 
+  function suggestedSONumber(customerId = form.customer_id, orderDate = form.order_date) {
+    const customer = customers.find((item) => String(item.id) === customerId);
+    const customerPart = compactCode(customer?.name || customer?.code || "CUSTOMER");
+    const datePart = (orderDate || today()).replaceAll("-", "");
+    const sequence = String(orders.length + 1).padStart(3, "0");
+    return `SO-${customerPart}-${datePart}-${sequence}`;
+  }
+
+  function openCreateModal() {
+    setCustomSONumber(false);
+    const orderDate = today();
+    setForm({ so_number: suggestedSONumber("", orderDate), customer_id: "", order_date: orderDate, target_delivery_date: "", lines: [{ product_id: "", packaging_config_id: "", quantity: "" }] });
+    setFormError("");
+    setModalOpen(true);
+  }
+
+  useEffect(() => {
+    if (!modalOpen || customSONumber) return;
+    const suggested = suggestedSONumber(form.customer_id, form.order_date);
+    if (form.so_number !== suggested) setForm((current) => ({ ...current, so_number: suggested }));
+  }, [modalOpen, customSONumber, form.customer_id, form.order_date, form.so_number, customers, orders.length]);
+
   function resetForm() {
     setForm({ so_number: "", customer_id: "", order_date: today(), target_delivery_date: "", lines: [{ product_id: "", packaging_config_id: "", quantity: "" }] });
+    setCustomSONumber(false);
     setFormError("");
   }
 
@@ -153,7 +181,7 @@ export default function SalesOrdersPage() {
       eyebrow="Production"
       title="Sales Orders"
       description="Manage customer demand and automatically generate controlled Production Orders."
-      actions={<button className="primary flex items-center gap-2" onClick={() => setModalOpen(true)}><Icon name="plus" />New Sales Order</button>}
+      actions={<button className="primary flex items-center gap-2" onClick={openCreateModal}><Icon name="plus" />New Sales Order</button>}
     >
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
@@ -223,9 +251,9 @@ export default function SalesOrdersPage() {
               <section>
                 <h3 className="font-bold">Order Information</h3>
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <label className="text-sm font-semibold text-slate-700">Sales Order Number<input className="field mt-2 text-base" placeholder="SO-2026-0001" value={form.so_number} onChange={(event) => setForm({ ...form, so_number: event.target.value })} /></label>
+                  <label className="text-sm font-semibold text-slate-700">Sales Order Number<input className="field mt-2 text-base" placeholder="SO-CUSTOMER-20260710-001" value={form.so_number} onChange={(event) => { setCustomSONumber(true); setForm({ ...form, so_number: event.target.value }); }} /></label>
                   <label className="text-sm font-semibold text-slate-700">Customer<select className="field mt-2 text-base" value={form.customer_id} onChange={(event) => setForm({ ...form, customer_id: event.target.value })}><option value="">Select customer</option>{customers.map((item) => <option value={item.id} key={item.id}>{item.code} — {item.name}</option>)}</select></label>
-                  <label className="text-sm font-semibold text-slate-700">Order Date<input className="field mt-2 text-base" type="date" value={form.order_date} onChange={(event) => setForm({ ...form, order_date: event.target.value })} /></label>
+                  <label className="text-sm font-semibold text-slate-700">Order Date<input className="field mt-2 text-base" type="date" value={form.order_date} onChange={(event) => { const order_date = event.target.value; setForm({ ...form, order_date, so_number: customSONumber ? form.so_number : suggestedSONumber(form.customer_id, order_date) }); }} /></label>
                   <label className="text-sm font-semibold text-slate-700">Target Delivery Date<input className="field mt-2 text-base" type="date" value={form.target_delivery_date} onChange={(event) => setForm({ ...form, target_delivery_date: event.target.value })} /></label>
                 </div>
               </section>

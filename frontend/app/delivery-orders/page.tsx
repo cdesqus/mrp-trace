@@ -34,6 +34,14 @@ type AvailableMasterBox = {
   product_name: string;
 };
 
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function compactCode(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 14) || "CUSTOMER";
+}
+
 export default function DeliveryOrdersPage() {
   const [items, setItems] = useState<Delivery[]>([]);
   const [orders, setOrders] = useState<SalesOrder[]>([]);
@@ -43,8 +51,9 @@ export default function DeliveryOrdersPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [customDONumber, setCustomDONumber] = useState(false);
   const [manualCode, setManualCode] = useState("");
-  const [form, setForm] = useState({ do_number: "", sales_order_id: "", delivery_date: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ do_number: "", sales_order_id: "", delivery_date: today() });
 
   const loadAvailable = useCallback(async (delivery: Delivery | null) => {
     if (!delivery || !["OPEN", "READY"].includes(delivery.status)) {
@@ -76,6 +85,28 @@ export default function DeliveryOrdersPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  function suggestedDONumber(salesOrderId = form.sales_order_id, deliveryDate = form.delivery_date) {
+    const order = orders.find((item) => String(item.id) === salesOrderId);
+    const customerPart = compactCode(order?.customer_name || "CUSTOMER");
+    const datePart = (deliveryDate || today()).replaceAll("-", "");
+    const sequence = String(items.length + 1).padStart(3, "0");
+    return `DO-${customerPart}-${datePart}-${sequence}`;
+  }
+
+  function openCreateDelivery() {
+    const deliveryDate = today();
+    setCustomDONumber(false);
+    setForm({ do_number: suggestedDONumber("", deliveryDate), sales_order_id: "", delivery_date: deliveryDate });
+    setMessage("");
+    setCreateOpen(true);
+  }
+
+  useEffect(() => {
+    if (!createOpen || customDONumber) return;
+    const suggested = suggestedDONumber(form.sales_order_id, form.delivery_date);
+    if (form.do_number !== suggested) setForm((current) => ({ ...current, do_number: suggested }));
+  }, [createOpen, customDONumber, form.sales_order_id, form.delivery_date, form.do_number, orders, items.length]);
 
   async function selectDelivery(item: Delivery) {
     setSelected(item);
@@ -155,7 +186,8 @@ export default function DeliveryOrdersPage() {
     try {
       await api("/api/delivery-orders", { method: "POST", body: JSON.stringify({ ...form, sales_order_id: Number(form.sales_order_id) }) });
       setCreateOpen(false);
-      setForm({ do_number: "", sales_order_id: "", delivery_date: new Date().toISOString().slice(0, 10) });
+      setCustomDONumber(false);
+      setForm({ do_number: "", sales_order_id: "", delivery_date: today() });
       await load();
     } catch (error) {
       setMessage((error as Error).message);
@@ -175,7 +207,7 @@ export default function DeliveryOrdersPage() {
   const availableUnits = available.reduce((sum, item) => sum + item.actual_unit_qty, 0);
 
   return (
-    <ModulePage eyebrow="Logistics & Packing" title="Delivery Orders" description="" actions={<button className="primary" onClick={() => setCreateOpen(true)}>New Delivery Order</button>}>
+    <ModulePage eyebrow="Logistics & Packing" title="Delivery Orders" description="" actions={<button className="primary" onClick={openCreateDelivery}>New Delivery Order</button>}>
       <div className="grid gap-4 md:grid-cols-5">
         {[["Open DO", summary.open], ["Ready DO", summary.ready], ["Shipped DO", summary.shipped], ["Assigned FG", summary.units.toLocaleString()], ["Outstanding", summary.outstanding.toLocaleString()]].map(([label, value]) => (
           <div className="card" key={label}>
@@ -290,7 +322,7 @@ export default function DeliveryOrdersPage() {
           <form className="w-full max-w-lg rounded-3xl bg-white shadow-2xl" onSubmit={create}>
             <header className="border-b px-6 py-5"><h2 className="text-2xl font-black">Create Delivery Order</h2></header>
             <div className="space-y-4 p-6">
-              <label className="block text-sm font-bold">DO Number<input className="field mt-2 text-base" placeholder="DO-2026-0001" value={form.do_number} onChange={(event) => setForm({ ...form, do_number: event.target.value })} /></label>
+              <label className="block text-sm font-bold">DO Number<input className="field mt-2 text-base" placeholder="DO-CUSTOMER-20260710-001" value={form.do_number} onChange={(event) => { setCustomDONumber(true); setForm({ ...form, do_number: event.target.value }); }} /></label>
               <label className="block text-sm font-bold">Sales Order<select className="field mt-2 text-base" value={form.sales_order_id} onChange={(event) => setForm({ ...form, sales_order_id: event.target.value })}><option value="">Select Sales Order</option>{orders.filter((item) => item.status !== "CANCELLED").map((item) => <option value={item.id} key={item.id}>{item.so_number} — {item.customer_name}</option>)}</select></label>
               <label className="block text-sm font-bold">Delivery Date<input className="field mt-2 text-base" type="date" value={form.delivery_date} onChange={(event) => setForm({ ...form, delivery_date: event.target.value })} /></label>
             </div>

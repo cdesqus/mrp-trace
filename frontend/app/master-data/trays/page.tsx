@@ -28,6 +28,7 @@ export default function TrayMasterPage() {
   const [trayType, setTrayType] = useState<TrayType>("SOURCE");
   const [active, setActive] = useState(true);
   const [editing, setEditing] = useState<Tray | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [viewing, setViewing] = useState<Tray | null>(null);
   const [label, setLabel] = useState<Tray | null>(null);
   const [error, setError] = useState("");
@@ -43,8 +44,21 @@ export default function TrayMasterPage() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  function reset() { setCode(""); setTrayType("SOURCE"); setActive(true); setEditing(null); }
-  function edit(item: Tray) { setEditing(item); setCode(item.tray_code); setTrayType(item.tray_type); setActive(item.is_active); }
+  function nextTrayCode(type: TrayType) {
+    const prefix = type === "SOURCE" ? "SRC" : type === "PASS" ? "PAS" : "RWK";
+    const max = items.reduce((current, item) => {
+      const match = item.tray_code.match(new RegExp(`^${prefix}-(\\d+)$`, "i"));
+      return match ? Math.max(current, Number(match[1])) : current;
+    }, 0);
+    return `${prefix}-${String(max + 1).padStart(3, "0")}`;
+  }
+  function reset() { setCode(""); setTrayType("SOURCE"); setActive(true); setEditing(null); setCreateOpen(false); }
+  function newTray() { setEditing(null); setTrayType("SOURCE"); setCode(nextTrayCode("SOURCE")); setActive(true); setCreateOpen(true); }
+  function edit(item: Tray) { setEditing(item); setCreateOpen(true); setCode(item.tray_code); setTrayType(item.tray_type); setActive(item.is_active); }
+
+  useEffect(() => {
+    if (createOpen && !editing) setCode(nextTrayCode(trayType));
+  }, [createOpen, editing, trayType, items]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -77,12 +91,12 @@ export default function TrayMasterPage() {
     }
   }
 
-  return <ModulePage eyebrow="Master Data" title="Tray Labels" description="Maintain permanent reusable Tray identities, ownership, type, and label history.">
-    <section className="card">
-      <div className="mb-4 flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-wider text-blue-700">{editing ? "Edit Tray" : "Create Tray"}</p><h2 className="mt-1 text-xl font-black">{editing ? editing.tray_code : "Generate Permanent Label"}</h2></div>{editing && <button className="rounded-xl border px-4 py-2 text-sm font-bold" onClick={reset}>Cancel Edit</button>}</div>
+  return <ModulePage eyebrow="Master Data" title="Tray Labels" description="Maintain permanent reusable Tray identities, ownership, type, and label history." actions={<button className="primary" onClick={newTray}>+ New Tray Label</button>}>
+    {(createOpen || editing) && <section className="card">
+      <div className="mb-4 flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-wider text-blue-700">{editing ? "Edit Tray" : "Create Tray"}</p><h2 className="mt-1 text-xl font-black">{editing ? editing.tray_code : "Generate Permanent Label"}</h2></div><button className="rounded-xl border px-4 py-2 text-sm font-bold" onClick={reset} type="button">{editing ? "Cancel Edit" : "Cancel"}</button></div>
       <form className="grid gap-3 sm:grid-cols-[1fr_220px_auto]" onSubmit={save}><input className="field font-mono text-base uppercase" placeholder={trayType==="SOURCE"?"SRC-005":trayType==="PASS"?"PAS-005":"RWK-005"} value={code} onChange={(event)=>setCode(event.target.value)}/><select className="field" value={trayType} onChange={(event)=>setTrayType(event.target.value as TrayType)}><option value="SOURCE">Source Tray</option><option value="PASS">Pass Tray</option><option value="REWORK">Rework Tray</option></select><button className="primary shrink-0" disabled={busy||!code.trim()}>{busy?"Saving…":editing?"Save Changes":"Generate Tray Label"}</button></form>
       {error&&<p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-    </section>
+    </section>}
 
     <section className="card mt-5 overflow-hidden p-0"><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-5 py-3">Tray ID</th><th className="px-5 py-3">Type</th><th className="px-5 py-3">Created By</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Actions</th></tr></thead><tbody className="divide-y">{items.map((item)=><tr className="hover:bg-blue-50/40" key={item.id}><td className="px-5 py-4 font-mono text-lg font-black">{item.tray_code}</td><td className="px-5 py-4"><TypeBadge type={item.tray_type}/></td><td className="px-5 py-4"><p className="font-bold">{item.created_by??"System"}</p><p className="text-xs text-slate-400">{new Date(item.created_at).toLocaleString()}</p></td><td className="px-5 py-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${item.is_active?"bg-emerald-50 text-emerald-700":"bg-slate-100 text-slate-500"}`}>{item.is_active?"ACTIVE":"INACTIVE"}</span></td><td className="px-5 py-4"><div className="flex gap-2"><TrayAction label="View tray" icon="◉" tone="blue" onClick={()=>setViewing(item)}/><TrayAction label="Edit tray" icon="✎" tone="slate" onClick={()=>edit(item)}/><TrayAction label="Print label" icon="▦" tone="blue" onClick={()=>setLabel(item)}/><TrayAction label={item.is_active?"Deactivate tray":"Reactivate tray"} icon={item.is_active?"⊘":"✓"} tone={item.is_active?"red":"green"} disabled={busy} onClick={()=>void toggle(item)}/></div></td></tr>)}</tbody></table></div></section>
 
