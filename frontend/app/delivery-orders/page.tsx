@@ -33,6 +33,19 @@ type AvailableMasterBox = {
   product_code: string;
   product_name: string;
 };
+type DeliverySmallBox = { box_code: string; qty: number; packed_at: string; serial_from: string; serial_to: string; serials: string[] };
+type DeliveryMasterBox = {
+  id: number;
+  master_box_code: string;
+  small_box_qty: number;
+  unit_qty: number;
+  packed_at: string;
+  production_order: string;
+  product_code: string;
+  product_name: string;
+  small_boxes: DeliverySmallBox[];
+};
+type DeliveryDetail = Delivery & { master_boxes: DeliveryMasterBox[] };
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -46,6 +59,8 @@ export default function DeliveryOrdersPage() {
   const [items, setItems] = useState<Delivery[]>([]);
   const [orders, setOrders] = useState<SalesOrder[]>([]);
   const [selected, setSelected] = useState<Delivery | null>(null);
+  const [partsDetail, setPartsDetail] = useState<DeliveryDetail | null>(null);
+  const [partsQuery, setPartsQuery] = useState("");
   const [available, setAvailable] = useState<AvailableMasterBox[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -182,6 +197,15 @@ export default function DeliveryOrdersPage() {
     }
   }
 
+  async function openParts(delivery: Delivery) {
+    try {
+      setPartsQuery("");
+      setPartsDetail(await api<DeliveryDetail>(`/api/delivery-orders/${delivery.id}/detail`));
+    } catch (error) {
+      setMessage((error as Error).message);
+    }
+  }
+
   async function create(event: FormEvent) {
     event.preventDefault();
     try {
@@ -244,6 +268,7 @@ export default function DeliveryOrdersPage() {
                     <td className="px-5 py-4">
                       <div className="flex gap-2">
                         <button className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-50" onClick={() => void selectDelivery(item)}>Open</button>
+                        <button className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50" onClick={() => void openParts(item)}>Parts</button>
                         <button className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50" onClick={() => void openPDF(item)}>PDF</button>
                         <RecordAuditButton audit={{ title: item.do_number, subtitle: item.customer_name, createdBy: item.created_by, createdAt: item.created_at, fields: [{ label: "Sales Order", value: item.so_number }, { label: "Delivery Date", value: item.delivery_date }, { label: "Order Qty", value: item.order_qty.toLocaleString() }, { label: "Assigned FG", value: item.unit_qty.toLocaleString() }, { label: "Outstanding", value: item.outstanding_qty.toLocaleString() }, { label: "Master Boxes", value: item.master_box_qty }] }} label="Info" />
                       </div>
@@ -331,6 +356,71 @@ export default function DeliveryOrdersPage() {
           </form>
         </div>
       )}
+
+      {partsDetail && (
+        <div className="fixed inset-0 z-[140] flex justify-end bg-slate-950/45 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) setPartsDetail(null); }}>
+          <aside className="flex h-full w-full max-w-6xl flex-col bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="flex items-start justify-between gap-4 border-b px-6 py-5">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-blue-700">Delivery Parts Detail</p>
+                <h2 className="mt-1 font-mono text-2xl font-black">{partsDetail.do_number}</h2>
+                <p className="mt-1 text-sm text-slate-500">{partsDetail.customer_name} - {partsDetail.so_number}</p>
+              </div>
+              <button className="h-10 w-10 rounded-xl border font-black" onClick={() => setPartsDetail(null)} type="button">X</button>
+            </header>
+            <div className="border-b p-5">
+              <div className="grid gap-3 sm:grid-cols-4">
+                <Info label="Master Boxes" value={String(partsDetail.master_box_qty)} />
+                <Info label="Assigned FG" value={partsDetail.unit_qty.toLocaleString()} />
+                <Info label="Outstanding" value={partsDetail.outstanding_qty.toLocaleString()} />
+                <Info label="Status" value={partsDetail.status} />
+              </div>
+              <input className="field mt-4 text-base" placeholder="Search master box, small box, product, PO, or serial..." value={partsQuery} onChange={(event) => setPartsQuery(event.target.value)} />
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="space-y-4">
+                {partsDetail.master_boxes.map((master) => {
+                  const query = partsQuery.trim().toLowerCase();
+                  const boxes = query ? master.small_boxes.filter((box) => `${master.master_box_code} ${master.product_code} ${master.product_name} ${master.production_order} ${box.box_code} ${box.serials.join(" ")}`.toLowerCase().includes(query)) : master.small_boxes;
+                  if (query && !boxes.length) return null;
+                  return (
+                    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4" key={master.id}>
+                      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                        <div>
+                          <p className="font-mono text-lg font-black text-blue-950">{master.master_box_code}</p>
+                          <p className="mt-1 text-sm text-slate-500">{master.product_code} - {master.product_name}</p>
+                          <p className="mt-1 text-xs font-bold text-slate-400">{master.production_order}</p>
+                        </div>
+                        <div className="flex gap-2 text-center">
+                          <span className="rounded-xl bg-white px-4 py-2 ring-1 ring-slate-200"><b className="block text-lg">{master.small_box_qty}</b><small>Small Boxes</small></span>
+                          <span className="rounded-xl bg-white px-4 py-2 ring-1 ring-slate-200"><b className="block text-lg">{master.unit_qty}</b><small>FG</small></span>
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-3">
+                        {boxes.map((box, index) => (
+                          <details className="rounded-xl border bg-white p-4" key={box.box_code} open={!!query}>
+                            <summary className="cursor-pointer list-none">
+                              <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+                                <div><span className="mr-3 rounded-lg bg-blue-100 px-2 py-1 text-xs font-black text-blue-700">#{index + 1}</span><b className="font-mono">{box.box_code}</b></div>
+                                <span className="text-sm font-black">{box.qty} FG</span>
+                              </div>
+                              <p className="mt-2 font-mono text-xs text-slate-500">{box.serial_from} to {box.serial_to}</p>
+                            </summary>
+                            <div className="mt-4 grid grid-cols-2 gap-2 border-t pt-4 sm:grid-cols-3 lg:grid-cols-5">
+                              {box.serials.map((serial) => <span className="rounded-lg bg-slate-50 px-2 py-1.5 font-mono text-xs font-bold ring-1 ring-slate-200" key={serial}>{serial}</span>)}
+                            </div>
+                          </details>
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+              {!partsDetail.master_boxes.length && <p className="py-16 text-center text-sm text-slate-500">No Master Boxes assigned to this Delivery Order.</p>}
+            </div>
+          </aside>
+        </div>
+      )}
     </ModulePage>
   );
 }
@@ -338,4 +428,8 @@ export default function DeliveryOrdersPage() {
 function StatusPill({ status }: { status: string }) {
   const color = status === "SHIPPED" ? "bg-emerald-50 text-emerald-700" : status === "READY" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-700";
   return <span className={`rounded-full px-2.5 py-1 text-xs font-black ${color}`}>{status}</span>;
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-400">{label}</p><p className="mt-1 font-black">{value}</p></div>;
 }

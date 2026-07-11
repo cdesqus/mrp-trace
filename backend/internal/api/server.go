@@ -88,6 +88,7 @@ func New(db *pgxpool.Pool) http.Handler {
 	api.GET("/finished-goods/:code", s.getFinishedGood)
 	api.GET("/delivery-orders", s.listDeliveryOrders)
 	api.POST("/delivery-orders", s.createDeliveryOrder)
+	api.GET("/delivery-orders/:id/detail", s.getDeliveryOrderDetail)
 	api.GET("/delivery-orders/:id/available-master-boxes", s.listDeliveryAvailableMasterBoxes)
 	api.POST("/delivery-orders/:id/auto-assign", s.autoAssignDeliveryMasterBoxes)
 	api.POST("/delivery-orders/:id/master-boxes", s.assignMasterBox)

@@ -92,6 +92,107 @@ func (s *Server) createDeliveryOrder(c *gin.Context) {
 	c.JSON(201, gin.H{"id": id, "do_number": req.DONumber})
 }
 
+func (s *Server) getDeliveryOrderDetail(c *gin.Context) {
+	doID, err := parseID(c.Param("id"))
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	var header struct {
+		ID                                       int64
+		DONumber, Status, SONumber               string
+		CustomerCode, CustomerName               string
+		DeliveryDate                             time.Time
+		MasterBoxQty, UnitQty, OrderQty, OpenQty int
+	}
+	err = s.db.QueryRow(c, `
+		SELECT d.id,d.do_number,d.delivery_date,d.status,so.so_number,c.customer_code,c.customer_name,
+		       COUNT(mb.id),COALESCE(SUM(mb.actual_unit_qty),0),
+		       COALESCE(order_qty.quantity,0),GREATEST(COALESCE(order_qty.quantity,0)-COALESCE(SUM(mb.actual_unit_qty),0),0)
+		FROM t_delivery_orders d
+		JOIN t_sales_orders so ON so.id=d.sales_order_id
+		JOIN m_customers c ON c.id=so.customer_id
+		LEFT JOIN (
+			SELECT sales_order_id,SUM(order_qty) quantity
+			FROM t_sales_order_lines
+			GROUP BY sales_order_id
+		) order_qty ON order_qty.sales_order_id=so.id
+		LEFT JOIN t_delivery_order_master_boxes domb ON domb.delivery_order_id=d.id
+		LEFT JOIN t_master_boxes mb ON mb.id=domb.master_box_id
+		WHERE d.id=$1
+		GROUP BY d.id,so.id,c.id,order_qty.quantity
+	`, doID).Scan(&header.ID, &header.DONumber, &header.DeliveryDate, &header.Status, &header.SONumber,
+		&header.CustomerCode, &header.CustomerName, &header.MasterBoxQty, &header.UnitQty, &header.OrderQty, &header.OpenQty)
+	if err != nil {
+		fail(c, 404, fmt.Errorf("delivery order not found"))
+		return
+	}
+	rows, err := s.db.Query(c, `
+		SELECT mb.id,mb.master_box_code,mb.actual_small_box_qty,mb.actual_unit_qty,mb.packed_at,
+		       po.production_order_number,p.product_code,p.product_name,
+		       sb.box_code,sb.actual_qty,sb.packed_at,MIN(u.serial_number),MAX(u.serial_number),
+		       ARRAY_AGG(u.serial_number ORDER BY sbu.box_position)
+		FROM t_delivery_order_master_boxes domb
+		JOIN t_master_boxes mb ON mb.id=domb.master_box_id
+		JOIN t_production_orders po ON po.id=mb.production_order_id
+		JOIN t_sales_order_lines sol ON sol.id=po.sales_order_line_id
+		JOIN m_products p ON p.id=sol.product_id
+		JOIN t_master_box_small_boxes mbsb ON mbsb.master_box_id=mb.id
+		JOIN t_small_boxes sb ON sb.id=mbsb.small_box_id
+		JOIN t_small_box_units sbu ON sbu.small_box_id=sb.id
+		JOIN t_units_tracking u ON u.id=sbu.unit_id
+		WHERE domb.delivery_order_id=$1
+		GROUP BY mb.id,po.id,p.id,mbsb.box_position,sb.id
+		ORDER BY mb.packed_at,mb.id,mbsb.box_position
+	`, doID)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	defer rows.Close()
+	masters := make([]gin.H, 0)
+	masterIndex := map[int64]int{}
+	for rows.Next() {
+		var masterID int64
+		var masterCode, productionOrder, productCode, productName, boxCode, serialFrom, serialTo string
+		var masterSmallBoxes, masterUnits, boxQty int
+		var masterPackedAt, boxPackedAt time.Time
+		var serials []string
+		if err = rows.Scan(&masterID, &masterCode, &masterSmallBoxes, &masterUnits, &masterPackedAt,
+			&productionOrder, &productCode, &productName, &boxCode, &boxQty, &boxPackedAt,
+			&serialFrom, &serialTo, &serials); err != nil {
+			fail(c, 500, err)
+			return
+		}
+		index, exists := masterIndex[masterID]
+		if !exists {
+			index = len(masters)
+			masterIndex[masterID] = index
+			masters = append(masters, gin.H{
+				"id": masterID, "master_box_code": masterCode,
+				"small_box_qty": masterSmallBoxes, "unit_qty": masterUnits,
+				"packed_at": masterPackedAt, "production_order": productionOrder,
+				"product_code": productCode, "product_name": productName,
+				"small_boxes": []gin.H{},
+			})
+		}
+		smallBoxes := masters[index]["small_boxes"].([]gin.H)
+		smallBoxes = append(smallBoxes, gin.H{
+			"box_code": boxCode, "qty": boxQty, "packed_at": boxPackedAt,
+			"serial_from": serialFrom, "serial_to": serialTo, "serials": serials,
+		})
+		masters[index]["small_boxes"] = smallBoxes
+	}
+	c.JSON(200, gin.H{
+		"id": header.ID, "do_number": header.DONumber, "delivery_date": header.DeliveryDate.Format("2006-01-02"),
+		"status": header.Status, "so_number": header.SONumber,
+		"customer_code": header.CustomerCode, "customer_name": header.CustomerName,
+		"master_box_qty": header.MasterBoxQty, "unit_qty": header.UnitQty,
+		"order_qty": header.OrderQty, "outstanding_qty": header.OpenQty,
+		"master_boxes": masters,
+	})
+}
+
 type assignMasterRequest struct {
 	MasterBoxCode string `json:"master_box_code" binding:"required"`
 }

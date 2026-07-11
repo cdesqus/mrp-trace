@@ -58,15 +58,23 @@ function Title({title,subtitle}:{title:string;subtitle:string}){return <div><h2 
 function WIPRow({item,max,index}:{item:DashboardData["wip"][number];max:number;index:number}){const colors=["bg-blue-600","bg-amber-500","bg-indigo-600","bg-violet-600","bg-emerald-600"];return <Link className="block rounded-xl border p-3 transition hover:border-blue-300 hover:bg-blue-50" href={item.href}><div className="flex items-center justify-between"><span className="text-sm font-bold">{item.label}</span><span className="text-lg font-black">{item.quantity.toLocaleString()}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${colors[index%colors.length]}`} style={{width:`${Math.max(item.quantity?4:0,item.quantity/max*100)}%`}}/></div></Link>}
 function ThroughputChart({items}:{items:DashboardData["throughput"]}){
   const max=Math.max(...items.flatMap(item=>[item.qc_inspected,item.packed]),1);
-  const width=760,pad=35,plotTop=20,plotH=180,step=(width-pad*2)/Math.max(items.length,1);
-  const points=items.map((item,index)=>`${pad+step*index+step/2},${plotTop+plotH-(item.pass_rate/100*plotH)}`).join(" ");
+  const width=820,leftPad=54,rightPad=58,plotTop=24,plotH=172,plotW=width-leftPad-rightPad,step=plotW/Math.max(items.length,1);
+  const yForQty=(value:number)=>plotTop+plotH-(value/max*plotH);
+  const yForRate=(value:number)=>plotTop+plotH-(Math.max(0,Math.min(100,value))/100*plotH);
+  const points=items.map((item,index)=>`${leftPad+step*index+step/2},${yForRate(item.pass_rate)}`).join(" ");
+  const qtyTicks=[max,Math.round(max/2),0];
+  const rateTicks=[100,50,0];
   return <div className="mt-4">
     <div className="overflow-x-auto pb-1">
-      <svg className="h-[245px] min-w-[650px] w-full" viewBox={`0 0 ${width} 235`} role="img" aria-label="Seven day throughput chart">
+      <svg className="h-[268px] min-w-[720px] w-full" viewBox={`0 0 ${width} 258`} role="img" aria-label="Seven day throughput chart">
         <defs><linearGradient id="qcBar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2563eb"/><stop offset="1" stopColor="#93c5fd"/></linearGradient></defs>
-        {[0,1,2,3,4].map(index=><line key={index} x1={pad} x2={width-pad} y1={plotTop+index*plotH/4} y2={plotTop+index*plotH/4} stroke="#e2e8f0" strokeDasharray="4 5"/>)}
+        {[0,1,2,3,4].map(index=><line key={index} x1={leftPad} x2={width-rightPad} y1={plotTop+index*plotH/4} y2={plotTop+index*plotH/4} stroke="#e2e8f0" strokeDasharray="4 5"/>)}
+        {qtyTicks.map(value=><text key={`qty-${value}`} x={leftPad-10} y={yForQty(value)+4} textAnchor="end" fill="#64748b" fontSize="10" fontWeight="700">{value}</text>)}
+        {rateTicks.map(value=><text key={`rate-${value}`} x={width-rightPad+10} y={yForRate(value)+4} fill="#d97706" fontSize="10" fontWeight="700">{value}%</text>)}
+        <text x={leftPad} y={12} fill="#64748b" fontSize="10" fontWeight="800">Qty</text>
+        <text x={width-rightPad} y={12} textAnchor="end" fill="#d97706" fontSize="10" fontWeight="800">Pass rate</text>
         {items.map((item,index)=>{
-          const center=pad+step*index+step/2;
+          const center=leftPad+step*index+step/2;
           const barWidth=Math.min(32,step*.32);
           const gap=6;
           const both=item.qc_inspected>0&&item.packed>0;
@@ -74,25 +82,33 @@ function ThroughputChart({items}:{items:DashboardData["throughput"]}){
           const packedX=both?center+gap/2:center-barWidth/2;
           const qcH=item.qc_inspected/max*plotH;
           const packedH=item.packed/max*plotH;
-          const qcY=plotTop+plotH-qcH;
-          const packedY=plotTop+plotH-packedH;
+          const qcY=yForQty(item.qc_inspected);
+          const packedY=yForQty(item.packed);
           return <g key={item.date}>
+            <title>{`${formatChartDate(item.date)}: ${item.qc_inspected} QC inspected, ${item.packed} packed FG, ${item.pass_rate}% pass rate`}</title>
             {item.qc_inspected>0&&<><rect x={qcX} y={qcY} width={barWidth} height={qcH} rx="6" fill="url(#qcBar)"/><text x={qcX+barWidth/2} y={Math.max(12,qcY-7)} textAnchor="middle" fill="#2563eb" fontSize="11" fontWeight="700">{item.qc_inspected}</text></>}
             {item.packed>0&&<><rect x={packedX} y={packedY} width={barWidth} height={packedH} rx="6" fill="#10b981"/><text x={packedX+barWidth/2} y={Math.max(12,packedY-7)} textAnchor="middle" fill="#059669" fontSize="11" fontWeight="700">{item.packed}</text></>}
-            <text x={center} y={225} textAnchor="middle" fill="#64748b" fontSize="11">{new Date(`${item.date}T00:00:00`).toLocaleDateString("en-US",{weekday:"short"})}</text>
+            <text x={center} y={226} textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="700">{formatChartDate(item.date)}</text>
           </g>;
         })}
         <polyline points={points} fill="none" stroke="#f59e0b" strokeWidth="3" strokeLinejoin="round"/>
-        {items.map((item,index)=><circle key={item.date} cx={pad+step*index+step/2} cy={plotTop+plotH-(item.pass_rate/100*plotH)} r="4" fill="#fff" stroke="#f59e0b" strokeWidth="3"/>)}
+        {items.map((item,index)=>{
+          const x=leftPad+step*index+step/2,y=yForRate(item.pass_rate);
+          return <g key={item.date}>
+            <circle cx={x} cy={y} r="4" fill="#fff" stroke="#f59e0b" strokeWidth="3"/>
+            {item.pass_rate>0&&<text x={x} y={Math.max(12,y-10)} textAnchor="middle" fill="#d97706" fontSize="10" fontWeight="800">{item.pass_rate}%</text>}
+          </g>;
+        })}
       </svg>
     </div>
     <div className="mt-2 flex flex-wrap items-center gap-x-7 gap-y-2 px-2 text-xs font-semibold text-slate-500">
       <span className="flex items-center gap-2"><i className="h-3 w-3 rounded-sm bg-blue-600"/>QC Inspected</span>
       <span className="flex items-center gap-2"><i className="h-3 w-3 rounded-sm bg-emerald-500"/>Packed FG</span>
-      <span className="flex items-center gap-2"><i className="h-0.5 w-5 bg-amber-500"/>Pass Rate</span>
+      <span className="flex items-center gap-2"><i className="h-0.5 w-5 bg-amber-500"/>Pass Rate (%)</span>
     </div>
   </div>
 }
+function formatChartDate(date:string){return new Date(`${date}T00:00:00`).toLocaleDateString("en-US",{day:"2-digit",month:"short"})}
 function QualityDonut({rate,passed,rejected}:{rate:number;passed:number;rejected:number}){return <div className="text-center"><div className="relative mx-auto h-40 w-40 rounded-full" style={{background:`conic-gradient(#10b981 0 ${rate}%,#f43f5e ${rate}% 100%)`}}><div className="absolute inset-4 flex flex-col items-center justify-center rounded-full bg-white"><b className="text-3xl">{rate}%</b><span className="text-xs font-bold text-slate-500">FPY</span></div></div><div className="mt-3 flex justify-center gap-4 text-xs"><span className="font-bold text-emerald-700">● {passed} OK</span><span className="font-bold text-rose-700">● {rejected} NG</span></div></div>}
 function DefectBar({item,max}:{item:{reason:string;count:number};max:number}){return <div><div className="flex justify-between gap-3 text-xs"><span className="font-bold">{item.reason}</span><b>{item.count}</b></div><div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-rose-500" style={{width:`${item.count/max*100}%`}}/></div></div>}
 function Empty({text}:{text:string}){return <p className="py-12 text-center text-sm text-slate-500">{text}</p>}
